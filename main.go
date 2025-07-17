@@ -34,16 +34,16 @@ type PRData struct {
 }
 
 type App struct {
-	client                  *github.Client
-	turnClient              *turn.Client
-	currentUser             *github.User
-	ctx                     context.Context
-	incoming                []PRData
-	outgoing                []PRData
-	menuItems               []*systray.MenuItem
-	cacheDir                string
-	showStaleIncoming bool
-	previousBlockedPRs      map[string]bool // Track previously blocked PRs by URL
+	client             *github.Client
+	turnClient         *turn.Client
+	currentUser        *github.User
+	ctx                context.Context
+	incoming           []PRData
+	outgoing           []PRData
+	menuItems          []*systray.MenuItem
+	cacheDir           string
+	showStaleIncoming  bool
+	previousBlockedPRs map[string]bool // Track previously blocked PRs by URL
 }
 
 func main() {
@@ -55,15 +55,15 @@ func main() {
 		log.Fatalf("Failed to get cache directory: %v", err)
 	}
 	cacheDir = filepath.Join(cacheDir, "github-pr-systray")
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		log.Fatalf("Failed to create cache directory: %v", err)
 	}
 
 	app := &App{
-		ctx:                     context.Background(),
-		cacheDir:                cacheDir,
-		showStaleIncoming: false, // Default to showing stale PRs
-		previousBlockedPRs:      make(map[string]bool),
+		ctx:                context.Background(),
+		cacheDir:           cacheDir,
+		showStaleIncoming:  false, // Default to showing stale PRs
+		previousBlockedPRs: make(map[string]bool),
 	}
 
 	err = app.initClients()
@@ -140,7 +140,7 @@ func (app *App) onReady() {
 			menu.ShowMenu()
 		}
 	})
-	
+
 	systray.SetOnRClick(func(menu systray.IMenu) {
 		log.Println("Right click detected")
 		if menu != nil {
@@ -170,13 +170,13 @@ func (app *App) cleanupOldCache() {
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		
+
 		filePath := filepath.Join(app.cacheDir, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		
+
 		// Remove cache files older than 5 days
 		if time.Since(info.ModTime()) > 5*24*time.Hour {
 			log.Printf("Removing old cache file: %s", entry.Name())
@@ -281,7 +281,7 @@ func (app *App) updatePRs() {
 
 func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 	user := app.currentUser.GetLogin()
-	
+
 	// Single query to get all PRs involving the user
 	query := fmt.Sprintf("is:open is:pr involves:%s archived:false", user)
 
@@ -293,12 +293,12 @@ func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 
 	log.Printf("Searching for PRs with query: %s", query)
 	searchStart := time.Now()
-	
+
 	result, _, err := app.client.Search.Issues(app.ctx, query, opts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("search PRs: %w", err)
 	}
-	
+
 	log.Printf("GitHub search completed in %v, found %d PRs", time.Since(searchStart), len(result.Issues))
 
 	// Process results
@@ -318,7 +318,7 @@ func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 
 	for _, issue := range prMap {
 		repo := strings.TrimPrefix(issue.GetRepositoryURL(), "https://api.github.com/repos/")
-		
+
 		prData := PRData{
 			ID:         issue.GetID(),
 			Number:     issue.GetNumber(),
@@ -334,7 +334,7 @@ func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 		if err == nil && turnData != nil {
 			turnSuccesses++
 			prData.Tags = turnData.Tags
-			
+
 			// Check if user is in NextAction
 			if turnData.NextAction != nil {
 				if _, exists := turnData.NextAction[user]; exists {
@@ -358,7 +358,7 @@ func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 		}
 	}
 
-	log.Printf("Turn API calls completed in %v (successes: %d, failures: %d)", 
+	log.Printf("Turn API calls completed in %v (successes: %d, failures: %d)",
 		time.Since(turnStart), turnSuccesses, turnFailures)
 	log.Printf("Final count: %d incoming, %d outgoing PRs", len(incoming), len(outgoing))
 
@@ -372,7 +372,7 @@ func isStale(updatedAt time.Time) bool {
 
 func formatAge(updatedAt time.Time) string {
 	duration := time.Since(updatedAt)
-	
+
 	if duration < time.Minute {
 		seconds := int(duration.Seconds())
 		if seconds == 1 {
@@ -411,7 +411,7 @@ func formatAge(updatedAt time.Time) string {
 
 func (app *App) updateMenu() {
 	log.Printf("Updating menu with %d incoming and %d outgoing PRs", len(app.incoming), len(app.outgoing))
-	
+
 	// Clear existing menu items
 	for _, item := range app.menuItems {
 		if item != nil {
@@ -431,7 +431,7 @@ func (app *App) updateMenu() {
 			incomingCount++
 		}
 	}
-	
+
 	outgoingBlocked := 0
 	outgoingCount := 0
 	for _, pr := range app.outgoing {
@@ -449,7 +449,7 @@ func (app *App) updateMenu() {
 		app.menuItems = append(app.menuItems, noPRs)
 		systray.AddSeparator()
 	}
-	
+
 	// Incoming section - clean header
 	if incomingCount > 0 {
 		incomingHeader := systray.AddMenuItem(fmt.Sprintf("Incoming (%d)", incomingCount), "")
@@ -478,7 +478,7 @@ func (app *App) updateMenu() {
 	}
 
 	systray.AddSeparator()
-	
+
 	// Outgoing section - clean header
 	if outgoingCount > 0 {
 		outgoingHeader := systray.AddMenuItem(fmt.Sprintf("Outgoing (%d)", outgoingCount), "")
@@ -506,7 +506,7 @@ func (app *App) updateMenu() {
 	systray.AddSeparator()
 
 	// Show stale incoming
-	showStaleIncomingItem := systray.AddMenuItem("Hide Stale (>90 days)", "")
+	showStaleIncomingItem := systray.AddMenuItem("Hide Stale (last update >90 days)", "")
 	app.menuItems = append(app.menuItems, showStaleIncomingItem)
 	if !app.showStaleIncoming {
 		showStaleIncomingItem.Check()
@@ -588,7 +588,7 @@ func (app *App) getTurnDataWithCache(url string, updatedAt time.Time) (*turn.Che
 	}
 	cacheData, err := json.Marshal(entry)
 	if err == nil {
-		if err := os.WriteFile(cacheFile, cacheData, 0644); err != nil {
+		if err := os.WriteFile(cacheFile, cacheData, 0o644); err != nil {
 			log.Printf("Failed to write cache for %s: %v", url, err)
 		}
 	}
