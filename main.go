@@ -566,8 +566,8 @@ func (app *App) getTurnDataWithCache(url string, updatedAt time.Time) (*turn.Che
 	if data, err := os.ReadFile(cacheFile); err == nil {
 		var entry cacheEntry
 		if err := json.Unmarshal(data, &entry); err == nil {
-			// Check if cache is still valid (5 day TTL)
-			if time.Since(entry.CachedAt) < 5*24*time.Hour && entry.UpdatedAt.Equal(updatedAt) {
+			// Check if cache is still valid (2 hour TTL)
+			if time.Since(entry.CachedAt) < 2*time.Hour && entry.UpdatedAt.Equal(updatedAt) {
 				return entry.Data, nil
 			}
 		}
