@@ -1,6 +1,6 @@
 # pr-menubar
 
-A cross-platform system tray application that monitors GitHub pull requests and shows how many are blocked on you.
+A system tray app that monitors GitHub pull requests and shows how many are blocked on you.
 
 ## Features
 
@@ -9,15 +9,13 @@ A cross-platform system tray application that monitors GitHub pull requests and 
 - Highlights blocked PRs with red indicator
 - Click on PRs to open them in your browser
 - Integrates with Turn API for enhanced blocking detection
-- Cross-platform support (macOS, Linux, Windows)
+- Desktop notifications when PRs become blocked (experimental)
 
 ## Prerequisites
 
-- Go 1.21 or later
+- Go 1.21+
 - GitHub CLI (`gh`) installed and authenticated
-- Access to GitHub repositories
-- CGO enabled (required for system tray functionality)
-- Platform-specific build tools for cross-compilation
+- CGO enabled
 
 ## Installation
 
@@ -29,7 +27,7 @@ A cross-platform system tray application that monitors GitHub pull requests and 
 
 2. Install dependencies:
    ```bash
-   make deps
+   go mod download
    ```
 
 3. Ensure you're authenticated with GitHub CLI:
@@ -39,37 +37,16 @@ A cross-platform system tray application that monitors GitHub pull requests and 
 
 ## Usage
 
-### Running the application
+Run the application:
 
 ```bash
-make run
+go run .
 ```
 
-### Building for current platform
+Build for current platform:
 
 ```bash
-make build
-```
-
-### Building for all platforms
-
-```bash
-make build-all
-```
-
-This will create binaries in the `dist/` directory for:
-- macOS (Intel and Apple Silicon)
-- Linux (x64 and ARM64)
-- Windows (x64 and ARM64)
-
-**Note**: Cross-compilation requires CGO and platform-specific toolchains. For Linux and Windows builds from macOS, you may need to install additional tools:
-
-```bash
-# For Linux cross-compilation
-brew install FiloSottile/musl-cross/musl-cross
-
-# For Windows cross-compilation  
-brew install mingw-w64
+go build -o pr-menubar
 ```
 
 ## How it works
@@ -119,10 +96,4 @@ Quit
 
 ## Development
 
-The application refreshes PR data every 5 minutes automatically. You can also manually refresh using the "Refresh" menu item.
-
-For development, you can modify the refresh interval in `main.go`:
-
-```go
-time.Sleep(5 * time.Minute) // Change this duration
-```
+The application refreshes PR data every 2 minutes automatically. You can also manually refresh using the "Refresh" menu item.

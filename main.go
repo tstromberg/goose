@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/energye/systray"
+	"github.com/gen2brain/beeep"
 	"github.com/google/go-github/v57/github"
 	"github.com/ready-to-review/turnclient/pkg/turn"
 	"golang.org/x/oauth2"
@@ -42,6 +43,7 @@ type App struct {
 	menuItems               []*systray.MenuItem
 	cacheDir                string
 	showStaleIncoming bool
+	previousBlockedPRs      map[string]bool // Track previously blocked PRs by URL
 }
 
 func main() {
@@ -61,6 +63,7 @@ func main() {
 		ctx:                     context.Background(),
 		cacheDir:                cacheDir,
 		showStaleIncoming: false, // Default to showing stale PRs
+		previousBlockedPRs:      make(map[string]bool),
 	}
 
 	err = app.initClients()
@@ -202,6 +205,44 @@ func (app *App) updatePRs() {
 		systray.SetTitle("!!!")
 		return
 	}
+
+	// Check for newly blocked PRs
+	newlyBlockedPRs := []PRData{}
+	currentBlockedPRs := make(map[string]bool)
+
+	// Check incoming PRs
+	for _, pr := range incoming {
+		if pr.BlockedOnYou {
+			currentBlockedPRs[pr.HTMLURL] = true
+			// Check if this is newly blocked
+			if !app.previousBlockedPRs[pr.HTMLURL] {
+				newlyBlockedPRs = append(newlyBlockedPRs, pr)
+			}
+		}
+	}
+
+	// Check outgoing PRs
+	for _, pr := range outgoing {
+		if pr.IsBlocked {
+			currentBlockedPRs[pr.HTMLURL] = true
+			// Check if this is newly blocked
+			if !app.previousBlockedPRs[pr.HTMLURL] {
+				newlyBlockedPRs = append(newlyBlockedPRs, pr)
+			}
+		}
+	}
+
+	// Send notifications for newly blocked PRs
+	for _, pr := range newlyBlockedPRs {
+		title := "PR Blocked on You"
+		message := fmt.Sprintf("%s #%d: %s", pr.Repository, pr.Number, pr.Title)
+		if err := beeep.Notify(title, message, ""); err != nil {
+			log.Printf("Failed to send notification: %v", err)
+		}
+	}
+
+	// Update the previous blocked PRs map
+	app.previousBlockedPRs = currentBlockedPRs
 
 	app.incoming = incoming
 	app.outgoing = outgoing
