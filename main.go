@@ -30,6 +30,7 @@ type PRData struct {
 	UpdatedAt    time.Time
 	IsBlocked    bool
 	BlockedOnYou bool
+	Size         string
 	Tags         []string
 }
 
@@ -130,7 +131,7 @@ func (app *App) loadCurrentUser() error {
 func (app *App) onReady() {
 	log.Println("System tray ready")
 	systray.SetIcon(getIcon())
-	systray.SetTitle("...")
+	systray.SetTitle("Downloading...")
 	systray.SetTooltip("GitHub PR Monitor")
 
 	// Set up click handlers
@@ -268,11 +269,11 @@ func (app *App) updatePRs() {
 	// Set title based on PR state
 	var title string
 	if incomingBlocked == 0 && outgoingBlocked == 0 {
-		title = "☀️ 0/0"
+		title = "0/0 ☀️"
 	} else if incomingBlocked > 0 {
-		title = fmt.Sprintf("❗ %d/%d", incomingBlocked, outgoingBlocked)
+		title = fmt.Sprintf("%d/%d 🔴", incomingBlocked, outgoingBlocked)
 	} else {
-		title = fmt.Sprintf("🚀 0/%d", outgoingBlocked)
+		title = fmt.Sprintf("0/%d 🚀", outgoingBlocked)
 	}
 	systray.SetTitle(title)
 
@@ -333,11 +334,12 @@ func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 		turnData, err := app.getTurnDataWithCache(issue.GetHTMLURL(), issue.GetUpdatedAt().Time)
 		if err == nil && turnData != nil {
 			turnSuccesses++
-			prData.Tags = turnData.Tags
+			prData.Tags = turnData.PRState.Tags
+			prData.Size = turnData.PRState.Size
 
-			// Check if user is in NextAction
-			if turnData.NextAction != nil {
-				if _, exists := turnData.NextAction[user]; exists {
+			// Check if user is in UnblockAction
+			if turnData.PRState.UnblockAction != nil {
+				if _, exists := turnData.PRState.UnblockAction[user]; exists {
 					prData.BlockedOnYou = true
 					log.Printf("PR %s #%d is blocked on %s", repo, issue.GetNumber(), user)
 				}
@@ -452,7 +454,7 @@ func (app *App) updateMenu() {
 
 	// Incoming section - clean header
 	if incomingCount > 0 {
-		incomingHeader := systray.AddMenuItem(fmt.Sprintf("Incoming (%d)", incomingCount), "")
+		incomingHeader := systray.AddMenuItem(fmt.Sprintf("Incoming — %d blocked on you", incomingBlocked), "")
 		incomingHeader.Disable()
 		app.menuItems = append(app.menuItems, incomingHeader)
 	}
@@ -463,9 +465,9 @@ func (app *App) updateMenu() {
 			if !app.showStaleIncoming && isStale(pr.UpdatedAt) {
 				continue
 			}
-			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
+			title := fmt.Sprintf("%s #%d – %s", pr.Repository, pr.Number, pr.Size)
 			if pr.BlockedOnYou {
-				title = fmt.Sprintf("%s ❗", title)
+				title = fmt.Sprintf("%s 🔴", title)
 			}
 			tooltip := fmt.Sprintf("%s by %s (%s)", pr.Title, pr.User.GetLogin(), formatAge(pr.UpdatedAt))
 			item := systray.AddMenuItem(title, tooltip)
@@ -481,7 +483,7 @@ func (app *App) updateMenu() {
 
 	// Outgoing section - clean header
 	if outgoingCount > 0 {
-		outgoingHeader := systray.AddMenuItem(fmt.Sprintf("Outgoing (%d)", outgoingCount), "")
+		outgoingHeader := systray.AddMenuItem(fmt.Sprintf("Outgoing — %d blocked on you", outgoingBlocked), "")
 		outgoingHeader.Disable()
 		app.menuItems = append(app.menuItems, outgoingHeader)
 	}
@@ -491,7 +493,7 @@ func (app *App) updateMenu() {
 			// No filters for outgoing PRs
 			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
 			if pr.IsBlocked {
-				title = fmt.Sprintf("%s ❗", title)
+				title = fmt.Sprintf("%s 🚀", title)
 			}
 			tooltip := fmt.Sprintf("%s by %s (%s)", pr.Title, pr.User.GetLogin(), formatAge(pr.UpdatedAt))
 			item := systray.AddMenuItem(title, tooltip)
@@ -575,7 +577,7 @@ func (app *App) getTurnDataWithCache(url string, updatedAt time.Time) (*turn.Che
 
 	// Cache miss, fetch from API
 	log.Printf("Cache miss for %s, fetching from Turn API", url)
-	data, err := app.turnClient.Check(app.ctx, url, updatedAt)
+	data, err := app.turnClient.Check(app.ctx, url, app.currentUser.GetLogin(), updatedAt)
 	if err != nil {
 		return nil, err
 	}
