@@ -1,4 +1,4 @@
-module github-pr-systray
+module ready-to-review
 
 go 1.23.4
 

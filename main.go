@@ -55,7 +55,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get cache directory: %v", err)
 	}
-	cacheDir = filepath.Join(cacheDir, "github-pr-systray")
+	cacheDir = filepath.Join(cacheDir, "ready-to-review")
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		log.Fatalf("Failed to create cache directory: %v", err)
 	}
