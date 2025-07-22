@@ -1,8 +1,5 @@
 # Ready to Review 🎯
 
-[![GitHub stars](https://img.shields.io/github/stars/turn-systems/pr-menubar)](https://github.com/turn-systems/pr-menubar/stargazers)
-[![License](https://img.shields.io/github/license/turn-systems/pr-menubar)](LICENSE)
-
 **Stop being the blocker. Get notified only when it matters.**
 
 The smartest PR tracker that knows when you're actually blocking someone - not just when you're assigned. Only alerts when tests pass and your review is truly needed.
@@ -37,17 +34,11 @@ cd pr-menubar
 make run  # That's it! 🎉
 ```
 
-## Real Teams, Real Results 📈
-
-> "Cut our PR review time by 40%. No more 'sorry, didn't see your PR' in standups."  
-> — Engineering Manager, 50-person startup
-
-> "Game changer for remote teams. Everyone stays unblocked."  
-> — Senior Developer, distributed team
 
 **Perfect for:**
 - ✅ Teams doing 10+ PRs/week
-- ✅ Remote/async teams across timezones  
+- ✅ Open-source contributors
+- ✅ Remote/async teams across timezones
 - ✅ Anyone who's ever felt guilty about blocking a PR
 - ✅ Engineers who value focus time but want to be responsive
 
@@ -74,7 +65,7 @@ Click to see all PRs instantly. Blocked ones are marked with ❗ so you know wha
 
 On macOS, right-click the menubar icon and toggle "Launch at Login". Set it once, never think about it again!
 
-## Get Started in 2 Minutes 🚀
+## Get Started in 1 minute 🚀
 
 ```bash
 # Copy, paste, done:
@@ -82,8 +73,8 @@ git clone https://github.com/turn-systems/pr-menubar.git && cd pr-menubar && mak
 ```
 
 **What happens next:**
-1. ✅ App appears in your menubar  
-2. ✅ Shows your PR count immediately  
+1. ✅ App appears in your menubar
+2. ✅ Shows your PR count immediately
 3. ✅ Click to see all PRs with smart prioritization
 4. ✅ Enable auto-start and never think about it again
 
@@ -111,7 +102,7 @@ make install  # Installs to the right place for your OS
 ```
 
 **Platform Magic:**
-- **macOS** 🍎: Installs a proper app bundle to `/Applications` 
+- **macOS** 🍎: Installs a proper app bundle to `/Applications`
 - **Linux/BSD** 🐧: Drops the binary in `/usr/local/bin`
 - **Windows** 🪟: Tucks it away in `%LOCALAPPDATA%\Programs\ready-to-review`
 
