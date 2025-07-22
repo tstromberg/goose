@@ -1,4 +1,5 @@
 - The UI/UX should follow Apple recommendations for UI
+- Using Emoji for this app is recommended as it reduces the amount of resources we need to load in
 - The experience should be something Steve Jobs & Jonathan Ives would be proud of
 - Code should be written for simplicity, scalability, security, and reliability
 - Expect that security professionals will be inspecting and attacking this service

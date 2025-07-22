@@ -24,6 +24,18 @@ import (
 //go:embed menubar-icon.png
 var embeddedIcon []byte
 
+const (
+	// Cache settings
+	cacheTTL             = 2 * time.Hour
+	cacheCleanupInterval = 5 * 24 * time.Hour
+	
+	// PR settings
+	stalePRThreshold = 90 * 24 * time.Hour
+	
+	// Update intervals
+	updateInterval = 2 * time.Minute
+)
+
 type PRData struct {
 	ID           int64  `json:"id"`
 	Number       int    `json:"number"`
@@ -49,8 +61,6 @@ type App struct {
 	cacheDir           string
 	showStaleIncoming  bool
 	previousBlockedPRs map[string]bool // Track previously blocked PRs by URL
-	defaultIcon        []byte          // Default icon data
-	logoIcon           []byte          // Logo icon data when no PRs are blocking
 }
 
 func main() {
@@ -69,13 +79,10 @@ func main() {
 	app := &App{
 		ctx:                context.Background(),
 		cacheDir:           cacheDir,
-		showStaleIncoming:  false, // Default to showing stale PRs
+		showStaleIncoming:  false,
 		previousBlockedPRs: make(map[string]bool),
-		defaultIcon:        getIcon(),
 	}
 	
-	// Load logo icon if available
-	app.logoIcon = app.loadLogoIcon()
 
 	log.Println("Initializing GitHub clients...")
 	err = app.initClients()
@@ -94,7 +101,7 @@ func main() {
 }
 
 func (app *App) initClients() error {
-	token, err := app.getGitHubToken()
+	token, err := app.githubToken()
 	if err != nil {
 		return fmt.Errorf("get GitHub token: %w", err)
 	}
@@ -149,7 +156,7 @@ func findGHCommand() (string, error) {
 	return "", fmt.Errorf("gh CLI not found. Please install it from https://cli.github.com")
 }
 
-func (app *App) getGitHubToken() (string, error) {
+func (app *App) githubToken() (string, error) {
 	ghPath, err := findGHCommand()
 	if err != nil {
 		return "", err
@@ -184,8 +191,8 @@ func (app *App) loadCurrentUser() error {
 
 func (app *App) onReady() {
 	log.Println("System tray ready")
-	systray.SetIcon(app.defaultIcon)
-	systray.SetTitle("Downloading...")
+	systray.SetIcon(embeddedIcon)
+	systray.SetTitle("Loading PRs...")
 	systray.SetTooltip("GitHub PR Monitor")
 
 	// Set up click handlers
@@ -241,7 +248,7 @@ func (app *App) cleanupOldCache() {
 }
 
 func (app *App) updateLoop() {
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(updateInterval)
 	defer ticker.Stop()
 
 	// Initial update
@@ -257,7 +264,7 @@ func (app *App) updatePRs() {
 	incoming, outgoing, err := app.fetchPRs()
 	if err != nil {
 		log.Printf("Error fetching PRs: %v", err)
-		systray.SetTitle("!!!")
+		systray.SetTitle("Error")
 		return
 	}
 
@@ -306,11 +313,12 @@ func (app *App) updatePRs() {
 	outgoingBlocked := 0
 
 	for _, pr := range incoming {
-		// Only count PRs that will be shown in the menu
-		if app.showStaleIncoming || !isStale(pr.UpdatedAt) {
-			if pr.BlockedOnYou {
-				incomingBlocked++
-			}
+		// Skip stale PRs if not showing them
+		if !app.showStaleIncoming && isStale(pr.UpdatedAt) {
+			continue
+		}
+		if pr.BlockedOnYou {
+			incomingBlocked++
 		}
 	}
 
@@ -320,24 +328,14 @@ func (app *App) updatePRs() {
 		}
 	}
 
-	// Set title and icon based on PR state
+	// Set title based on PR state
+	systray.SetIcon(embeddedIcon)
 	if incomingBlocked == 0 && outgoingBlocked == 0 {
-		// Show only icon when no PRs are blocking
 		systray.SetTitle("")
-		// Use logo icon when no PRs are blocking
-		if app.logoIcon != nil {
-			systray.SetIcon(app.logoIcon)
-		}
 	} else if incomingBlocked > 0 {
-		title := fmt.Sprintf("%d/%d 🔴", incomingBlocked, outgoingBlocked)
-		systray.SetTitle(title)
-		// Use default icon when there are blocking PRs
-		systray.SetIcon(app.defaultIcon)
+		systray.SetTitle(fmt.Sprintf("%d/%d 🔴", incomingBlocked, outgoingBlocked))
 	} else {
-		title := fmt.Sprintf("0/%d 🚀", outgoingBlocked)
-		systray.SetTitle(title)
-		// Use default icon when there are blocking PRs
-		systray.SetIcon(app.defaultIcon)
+		systray.SetTitle(fmt.Sprintf("0/%d 🚀", outgoingBlocked))
 	}
 
 	app.updateMenu()
@@ -394,7 +392,7 @@ func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 		}
 
 		// Get Turn API data with caching
-		turnData, err := app.getTurnDataWithCache(issue.GetHTMLURL(), issue.GetUpdatedAt().Time)
+		turnData, err := app.turnDataWithCache(issue.GetHTMLURL(), issue.GetUpdatedAt().Time)
 		if err == nil && turnData != nil {
 			turnSuccesses++
 			prData.Tags = turnData.PRState.Tags
@@ -432,7 +430,7 @@ func (app *App) fetchPRs() ([]PRData, []PRData, error) {
 
 // isStale returns true if the PR hasn't been updated in over 90 days
 func isStale(updatedAt time.Time) bool {
-	return time.Since(updatedAt) > 90*24*time.Hour
+	return time.Since(updatedAt) > stalePRThreshold
 }
 
 func formatAge(updatedAt time.Time) string {
@@ -485,11 +483,11 @@ func (app *App) updateMenu() {
 	incomingBlocked := 0
 	incomingCount := 0
 	for _, pr := range app.incoming {
-		if pr.BlockedOnYou {
-			incomingBlocked++
-		}
 		if app.showStaleIncoming || !isStale(pr.UpdatedAt) {
 			incomingCount++
+			if pr.BlockedOnYou {
+				incomingBlocked++
+			}
 		}
 	}
 
@@ -524,7 +522,10 @@ func (app *App) updateMenu() {
 			if !app.showStaleIncoming && isStale(pr.UpdatedAt) {
 				continue
 			}
-			title := fmt.Sprintf("%s #%d – %s", pr.Repository, pr.Number, pr.Size)
+			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
+			if pr.Size != "" {
+				title = fmt.Sprintf("%s – %s", title, pr.Size)
+			}
 			if pr.BlockedOnYou {
 				title = fmt.Sprintf("%s 🔴", title)
 			}
@@ -567,14 +568,14 @@ func (app *App) updateMenu() {
 	systray.AddSeparator()
 
 	// Show stale incoming
-	showStaleIncomingItem := systray.AddMenuItem("Hide Stale (last update >90 days)", "")
+	showStaleIncomingItem := systray.AddMenuItem("Show stale PRs (>90 days)", "")
 	app.menuItems = append(app.menuItems, showStaleIncomingItem)
 	if !app.showStaleIncoming {
 		showStaleIncomingItem.Check()
 	}
 	showStaleIncomingItem.Click(func() {
 		app.showStaleIncoming = !app.showStaleIncoming
-		if !app.showStaleIncoming {
+		if app.showStaleIncoming {
 			showStaleIncomingItem.Check()
 		} else {
 			showStaleIncomingItem.Uncheck()
@@ -613,9 +614,7 @@ func (app *App) updateMenu() {
 	// Now hide old menu items after new ones are created
 	// This prevents the flicker by ensuring new items exist before old ones disappear
 	for _, item := range oldMenuItems {
-		if item != nil {
-			item.Hide()
-		}
+		item.Hide()
 	}
 }
 
@@ -625,7 +624,7 @@ type cacheEntry struct {
 	UpdatedAt time.Time           `json:"updated_at"`
 }
 
-func (app *App) getTurnDataWithCache(url string, updatedAt time.Time) (*turn.CheckResponse, error) {
+func (app *App) turnDataWithCache(url string, updatedAt time.Time) (*turn.CheckResponse, error) {
 	// Create cache key from URL and updated timestamp
 	key := fmt.Sprintf("%s-%s", url, updatedAt.Format(time.RFC3339))
 	hash := sha256.Sum256([]byte(key))
@@ -636,7 +635,7 @@ func (app *App) getTurnDataWithCache(url string, updatedAt time.Time) (*turn.Che
 		var entry cacheEntry
 		if err := json.Unmarshal(data, &entry); err == nil {
 			// Check if cache is still valid (2 hour TTL)
-			if time.Since(entry.CachedAt) < 2*time.Hour && entry.UpdatedAt.Equal(updatedAt) {
+			if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
 				return entry.Data, nil
 			}
 		}
@@ -657,7 +656,7 @@ func (app *App) getTurnDataWithCache(url string, updatedAt time.Time) (*turn.Che
 	}
 	cacheData, err := json.Marshal(entry)
 	if err == nil {
-		if err := os.WriteFile(cacheFile, cacheData, 0o644); err != nil {
+		if err := os.WriteFile(cacheFile, cacheData, 0o600); err != nil {
 			log.Printf("Failed to write cache for %s: %v", url, err)
 		}
 	}
@@ -665,22 +664,3 @@ func (app *App) getTurnDataWithCache(url string, updatedAt time.Time) (*turn.Che
 	return data, nil
 }
 
-func getIcon() []byte {
-	// Simple icon data - you can replace this with a proper icon
-	return []byte{
-		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
-		0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10,
-		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0xF3, 0xFF, 0x61, 0x00, 0x00, 0x00,
-		0x19, 0x74, 0x45, 0x58, 0x74, 0x53, 0x6F, 0x66, 0x74, 0x77, 0x61, 0x72,
-		0x65, 0x00, 0x41, 0x64, 0x6F, 0x62, 0x65, 0x20, 0x49, 0x6D, 0x61, 0x67,
-		0x65, 0x52, 0x65, 0x61, 0x64, 0x79, 0x71, 0xC9, 0x65, 0x3C, 0x00, 0x00,
-		0x00, 0x46, 0x49, 0x44, 0x41, 0x54, 0x38, 0xCB, 0x63, 0x60, 0x18, 0x05,
-		0xA3, 0x60, 0x14, 0x8C, 0x02, 0x08, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
-		0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-	}
-}
-
-func (app *App) loadLogoIcon() []byte {
-	log.Printf("Using embedded menubar icon")
-	return embeddedIcon
-}
