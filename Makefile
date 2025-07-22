@@ -4,7 +4,7 @@ VERSION = 1.0.0
 BUNDLE_VERSION = 1
 BUNDLE_ID = dev.codegroove.r2r
 
-.PHONY: build clean deps run app-bundle
+.PHONY: build clean deps run app-bundle install install-darwin install-unix install-windows
 
 # Install dependencies
 deps:
@@ -17,7 +17,11 @@ run:
 
 # Build for current platform
 build:
+ifeq ($(OS),Windows_NT)
+	CGO_ENABLED=1 go build -ldflags -H=windowsgui -o $(APP_NAME).exe main.go
+else
 	CGO_ENABLED=1 go build -o $(APP_NAME) main.go
+endif
 
 # Build for all platforms
 build-all: build-darwin build-linux build-windows
@@ -34,8 +38,8 @@ build-linux:
 
 # Build for Windows
 build-windows:
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -o out/$(APP_NAME)-windows-amd64.exe main.go
-	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -o out/$(APP_NAME)-windows-arm64.exe main.go
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-amd64.exe main.go
+	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-arm64.exe main.go
 
 # Clean build artifacts
 clean:
@@ -119,3 +123,41 @@ app-bundle: out build-darwin install-appify
 	codesign --force --deep --sign - --options runtime "out/$(BUNDLE_NAME).app"
 	
 	@echo "macOS app bundle created: out/$(BUNDLE_NAME).app"
+
+# Install the application (detects OS automatically)
+install:
+ifeq ($(shell uname),Darwin)
+	@$(MAKE) install-darwin
+else ifeq ($(OS),Windows_NT)
+	@$(MAKE) install-windows
+else ifneq ($(filter $(shell uname),Linux FreeBSD OpenBSD NetBSD SunOS),)
+	@$(MAKE) install-unix
+else
+	@echo "Unsupported platform. Please install manually."
+	@exit 1
+endif
+
+# Install on macOS
+install-darwin: app-bundle
+	@echo "Installing on macOS..."
+	@echo "Copying $(BUNDLE_NAME).app to /Applications..."
+	@rm -rf "/Applications/$(BUNDLE_NAME).app"
+	@cp -R "out/$(BUNDLE_NAME).app" "/Applications/"
+	@echo "Installation complete! $(BUNDLE_NAME) has been installed to /Applications"
+
+# Install on Unix-like systems (Linux, BSD variants, Solaris)
+install-unix: build
+	@echo "Installing on $(shell uname)..."
+	@echo "Installing binary to /usr/local/bin..."
+	@sudo install -m 755 $(APP_NAME) /usr/local/bin/
+	@echo "Installation complete! $(APP_NAME) has been installed to /usr/local/bin"
+
+# Install on Windows
+install-windows: build
+	@echo "Installing on Windows..."
+	@echo "Creating program directory..."
+	@if not exist "%LOCALAPPDATA%\Programs\$(APP_NAME)" mkdir "%LOCALAPPDATA%\Programs\$(APP_NAME)"
+	@echo "Copying executable..."
+	@copy /Y "$(APP_NAME).exe" "%LOCALAPPDATA%\Programs\$(APP_NAME)\"
+	@echo "Installation complete! $(APP_NAME) has been installed to %LOCALAPPDATA%\Programs\$(APP_NAME)"
+	@echo "You may want to add %LOCALAPPDATA%\Programs\$(APP_NAME) to your PATH environment variable."

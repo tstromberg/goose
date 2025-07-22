@@ -1,32 +1,52 @@
-# PR Menubar: Your friendly neighborhood PR reminder!
+# Ready to Review
 
 ![PR Menubar Screenshot](media/screenshot.png)
 
-NOTE: This is an early experiment to support what we are working on at https://codegroove.dev/products/
+A menubar app that keeps you on top of GitHub pull requests. Never be the bottleneck again!
 
-Tired of being the bottleneck? `pr-menubar` lives in your system tray and shows you how many GitHub pull requests are waiting for *you*.
+## What It Does
 
-It's a simple way to stay on top of your reviews and keep your team moving.
+Ready to Review lives in your system tray and shows a real-time count of pull requests that need your attention. The format is simple: `incoming / outgoing`
 
-## Quick Start
+- **Incoming**: PRs from others waiting for your review
+- **Outgoing**: Your PRs blocked by others
 
-1.  **Prerequisites**: Make sure you have Go 1.21+ and the GitHub CLI (`gh`) installed and authenticated.
-2.  **Clone & Run**:
-    ```bash
-    git clone https://github.com/turn-systems/pr-menubar.git
-    cd pr-menubar
-    go run .
-    ```
+Click the icon to see all PRs, with blocked ones marked with `❗`. Click any PR to open it in your browser.
 
-That's it! The app will appear in your system tray.
+## Installation
 
-## How to Read It
+### Prerequisites
+- Go 1.21+
+- GitHub CLI (`gh`) installed and authenticated
 
-The tray icon shows `incoming / outgoing` PRs that are currently blocked.
+### Quick Install
 
--   ` incoming`: PRs by others that need your review.
--   ` outgoing`: Your own PRs that are blocked by someone else.
+```bash
+git clone https://github.com/turn-systems/pr-menubar.git
+cd pr-menubar
+make install
+```
 
-A `❗` next to a PR in the menu means it's blocked. Click any PR to open it directly in your browser.
+This will:
+- **macOS**: Build and install the app to `/Applications`
+- **Linux/BSD/Solaris**: Build and install the binary to `/usr/local/bin`
+- **Windows**: Build and install to `%LOCALAPPDATA%\Programs\ready-to-review`
+
+### Manual Build
+
+```bash
+# Build for current platform
+make build
+
+# macOS: Create app bundle
+make app-bundle
+
+# Run directly without installing
+go run .
+```
+
+## Development
+
+This project is part of our work at [CodeGroove](https://codegroove.dev/products/).
 
 Happy reviewing! ✨
