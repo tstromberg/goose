@@ -57,6 +57,9 @@ install-appify:
 
 # Build macOS application bundle using appify
 app-bundle: out build-darwin install-appify
+	@echo "Removing old app bundle..."
+	@rm -rf "out/$(BUNDLE_NAME).app"
+	
 	@echo "Creating macOS application bundle with appify..."
 	
 	# Create universal binary
@@ -94,9 +97,15 @@ app-bundle: out build-darwin install-appify
 	@echo "Creating English localization..."
 	mkdir -p "out/$(BUNDLE_NAME).app/Contents/Resources/en.lproj"
 	
+	# Fix the executable name (appify adds .app suffix which we don't want)
+	@echo "Fixing executable name..."
+	@if [ -f "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME).app" ]; then \
+		mv "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME).app" "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME)"; \
+	fi
+	
 	# Fix the Info.plist
 	@echo "Fixing Info.plist..."
-	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Ready\\ to\\ Review.app" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Ready\\ to\\ Review" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :LSUIElement true" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string en" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \

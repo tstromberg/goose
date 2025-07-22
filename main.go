@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,9 @@ import (
 	"github.com/ready-to-review/turnclient/pkg/turn"
 	"golang.org/x/oauth2"
 )
+
+//go:embed menubar-icon.png
+var embeddedIcon []byte
 
 type PRData struct {
 	ID           int64  `json:"id"`
@@ -73,16 +77,19 @@ func main() {
 	// Load logo icon if available
 	app.logoIcon = app.loadLogoIcon()
 
+	log.Println("Initializing GitHub clients...")
 	err = app.initClients()
 	if err != nil {
 		log.Fatalf("Failed to initialize clients: %v", err)
 	}
 
+	log.Println("Loading current user...")
 	err = app.loadCurrentUser()
 	if err != nil {
 		log.Fatalf("Failed to load current user: %v", err)
 	}
 
+	log.Println("Starting systray...")
 	systray.Run(app.onReady, app.onExit)
 }
 
@@ -109,19 +116,60 @@ func (app *App) initClients() error {
 	return nil
 }
 
+func findGHCommand() (string, error) {
+	log.Println("Looking for gh command...")
+	
+	// Log current PATH
+	log.Printf("Current PATH: %s", os.Getenv("PATH"))
+	
+	// Check if gh is in PATH first
+	if path, err := exec.LookPath("gh"); err == nil {
+		log.Printf("Found gh in PATH: %s", path)
+		return path, nil
+	}
+	
+	log.Println("gh not found in PATH, checking common locations...")
+	
+	// Common installation paths for gh
+	commonPaths := []string{
+		"/opt/homebrew/bin/gh",      // Homebrew on Apple Silicon
+		"/usr/local/bin/gh",          // Homebrew on Intel / manual install
+		"/usr/bin/gh",                // System package managers
+		"/home/linuxbrew/.linuxbrew/bin/gh", // Linuxbrew
+	}
+	
+	for _, path := range commonPaths {
+		log.Printf("Checking: %s", path)
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("Found gh at: %s", path)
+			return path, nil
+		}
+	}
+	
+	return "", fmt.Errorf("gh CLI not found. Please install it from https://cli.github.com")
+}
+
 func (app *App) getGitHubToken() (string, error) {
-	cmd := exec.Command("gh", "auth", "token")
-	output, err := cmd.Output()
+	ghPath, err := findGHCommand()
 	if err != nil {
-		return "", fmt.Errorf("exec 'gh auth token': %w", err)
+		return "", err
+	}
+	
+	log.Printf("Executing: %s auth token", ghPath)
+	cmd := exec.Command(ghPath, "auth", "token")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("gh command failed with output: %s", string(output))
+		return "", fmt.Errorf("exec 'gh auth token': %w (output: %s)", err, string(output))
 	}
 	token := strings.TrimSpace(string(output))
 	if token == "" {
 		return "", fmt.Errorf("empty GitHub token")
 	}
 	if len(token) < 20 {
-		return "", fmt.Errorf("invalid GitHub token length")
+		return "", fmt.Errorf("invalid GitHub token length: %d", len(token))
 	}
+	log.Printf("Successfully obtained GitHub token (length: %d)", len(token))
 	return token, nil
 }
 
@@ -633,28 +681,6 @@ func getIcon() []byte {
 }
 
 func (app *App) loadLogoIcon() []byte {
-	// When running from app bundle, we need to find the resources
-	execPath, err := os.Executable()
-	if err != nil {
-		log.Printf("Failed to get executable path: %v", err)
-		return nil
-	}
-	
-	// Try multiple possible paths
-	possiblePaths := []string{
-		// Development: relative to working directory (use pre-sized icon)
-		"out/menubar-icon.png",
-		// App bundle: in Resources directory
-		filepath.Join(filepath.Dir(execPath), "..", "Resources", "menubar-icon.png"),
-	}
-	
-	for _, path := range possiblePaths {
-		if data, err := os.ReadFile(path); err == nil {
-			log.Printf("Successfully loaded logo icon from %s", path)
-			return data
-		}
-	}
-	
-	log.Printf("Could not find logo icon in any of the expected paths")
-	return nil
+	log.Printf("Using embedded menubar icon")
+	return embeddedIcon
 }
