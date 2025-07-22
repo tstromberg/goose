@@ -1,3 +1,7 @@
+// Package main implements a macOS menubar application for monitoring GitHub pull requests.
+// It displays incoming and outgoing PRs, highlighting those that are blocked and need attention.
+// The app integrates with the Turn API to provide additional PR metadata and uses the GitHub API
+// for fetching PR data. It follows Apple's Human Interface Guidelines for menubar applications.
 package main
 
 import (
@@ -8,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,7 +108,7 @@ func main() {
 func (app *App) initClients() error {
 	token, err := app.githubToken()
 	if err != nil {
-		return fmt.Errorf("get GitHub token: %w", err)
+		return fmt.Errorf("get github token: %w", err)
 	}
 
 	ts := oauth2.StaticTokenSource(
@@ -153,7 +158,7 @@ func findGHCommand() (string, error) {
 		}
 	}
 	
-	return "", fmt.Errorf("gh CLI not found. Please install it from https://cli.github.com")
+	return "", fmt.Errorf("gh cli not found, please install from https://cli.github.com")
 }
 
 func (app *App) githubToken() (string, error) {
@@ -171,10 +176,10 @@ func (app *App) githubToken() (string, error) {
 	}
 	token := strings.TrimSpace(string(output))
 	if token == "" {
-		return "", fmt.Errorf("empty GitHub token")
+		return "", fmt.Errorf("empty github token")
 	}
 	if len(token) < 20 {
-		return "", fmt.Errorf("invalid GitHub token length: %d", len(token))
+		return "", fmt.Errorf("invalid github token length: %d", len(token))
 	}
 	log.Printf("Successfully obtained GitHub token (length: %d)", len(token))
 	return token, nil
@@ -433,6 +438,44 @@ func isStale(updatedAt time.Time) bool {
 	return time.Since(updatedAt) > stalePRThreshold
 }
 
+// openURL safely opens a URL in the default browser after validation
+func openURL(rawURL string) error {
+	// Parse and validate the URL
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parse url: %w", err)
+	}
+	
+	// Only allow https URLs for security
+	if u.Scheme != "https" {
+		return fmt.Errorf("invalid url scheme: %s (only https allowed)", u.Scheme)
+	}
+	
+	// Whitelist of allowed hosts
+	allowedHosts := map[string]bool{
+		"github.com":             true,
+		"www.github.com":         true,
+		"dash.ready-to-review.dev": true,
+	}
+	
+	if !allowedHosts[u.Host] {
+		return fmt.Errorf("invalid host: %s", u.Host)
+	}
+	
+	// Execute the open command
+	cmd := exec.Command("open", rawURL)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("open url: %w", err)
+	}
+	
+	// Don't wait for the command to finish
+	go func() {
+		cmd.Wait() // Prevent zombie processes
+	}()
+	
+	return nil
+}
+
 func formatAge(updatedAt time.Time) string {
 	duration := time.Since(updatedAt)
 
@@ -534,7 +577,9 @@ func (app *App) updateMenu() {
 			app.menuItems = append(app.menuItems, item)
 			url := pr.HTMLURL
 			item.Click(func() {
-				exec.Command("open", url).Start()
+				if err := openURL(url); err != nil {
+					log.Printf("failed to open url: %v", err)
+				}
 			})
 		}
 	}
@@ -560,7 +605,9 @@ func (app *App) updateMenu() {
 			app.menuItems = append(app.menuItems, item)
 			url := pr.HTMLURL
 			item.Click(func() {
-				exec.Command("open", url).Start()
+				if err := openURL(url); err != nil {
+					log.Printf("failed to open url: %v", err)
+				}
 			})
 		}
 	}
@@ -590,7 +637,9 @@ func (app *App) updateMenu() {
 	dashboardItem := systray.AddMenuItem("Dashboard", "")
 	app.menuItems = append(app.menuItems, dashboardItem)
 	dashboardItem.Click(func() {
-		exec.Command("open", "https://dash.ready-to-review.dev/").Start()
+		if err := openURL("https://dash.ready-to-review.dev/"); err != nil {
+			log.Printf("failed to open dashboard: %v", err)
+		}
 	})
 
 	// About
@@ -598,7 +647,9 @@ func (app *App) updateMenu() {
 	app.menuItems = append(app.menuItems, aboutItem)
 	aboutItem.Click(func() {
 		log.Println("GitHub PR Monitor - A system tray app for tracking PR reviews")
-		exec.Command("open", "https://github.com/ready-to-review/turnturnturn").Start()
+		if err := openURL("https://github.com/ready-to-review/pr-menubar"); err != nil {
+			log.Printf("failed to open about page: %v", err)
+		}
 	})
 
 	systray.AddSeparator()
