@@ -23,7 +23,7 @@ brew install gh go  # macOS (or visit https://cli.github.com and https://go.dev)
 gh auth login
 
 # Install & run Ready to Review:
-git clone https://github.com/turn-systems/pr-menubar.git && cd pr-menubar && make run
+git clone https://github.com/ready-to-review/pr-menubar.git && cd pr-menubar && make run
 ```
 
 That's it! The app appears in your menubar showing your PR count. Click to see all PRs with smart prioritization.
