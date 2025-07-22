@@ -45,6 +45,8 @@ type App struct {
 	cacheDir           string
 	showStaleIncoming  bool
 	previousBlockedPRs map[string]bool // Track previously blocked PRs by URL
+	defaultIcon        []byte          // Default icon data
+	logoIcon           []byte          // Logo icon data when no PRs are blocking
 }
 
 func main() {
@@ -65,7 +67,11 @@ func main() {
 		cacheDir:           cacheDir,
 		showStaleIncoming:  false, // Default to showing stale PRs
 		previousBlockedPRs: make(map[string]bool),
+		defaultIcon:        getIcon(),
 	}
+	
+	// Load logo icon if available
+	app.logoIcon = app.loadLogoIcon()
 
 	err = app.initClients()
 	if err != nil {
@@ -130,7 +136,7 @@ func (app *App) loadCurrentUser() error {
 
 func (app *App) onReady() {
 	log.Println("System tray ready")
-	systray.SetIcon(getIcon())
+	systray.SetIcon(app.defaultIcon)
 	systray.SetTitle("Downloading...")
 	systray.SetTooltip("GitHub PR Monitor")
 
@@ -266,16 +272,25 @@ func (app *App) updatePRs() {
 		}
 	}
 
-	// Set title based on PR state
-	var title string
+	// Set title and icon based on PR state
 	if incomingBlocked == 0 && outgoingBlocked == 0 {
-		title = "0/0 ☀️"
+		// Show only icon when no PRs are blocking
+		systray.SetTitle("")
+		// Use logo icon when no PRs are blocking
+		if app.logoIcon != nil {
+			systray.SetIcon(app.logoIcon)
+		}
 	} else if incomingBlocked > 0 {
-		title = fmt.Sprintf("%d/%d 🔴", incomingBlocked, outgoingBlocked)
+		title := fmt.Sprintf("%d/%d 🔴", incomingBlocked, outgoingBlocked)
+		systray.SetTitle(title)
+		// Use default icon when there are blocking PRs
+		systray.SetIcon(app.defaultIcon)
 	} else {
-		title = fmt.Sprintf("0/%d 🚀", outgoingBlocked)
+		title := fmt.Sprintf("0/%d 🚀", outgoingBlocked)
+		systray.SetTitle(title)
+		// Use default icon when there are blocking PRs
+		systray.SetIcon(app.defaultIcon)
 	}
-	systray.SetTitle(title)
 
 	app.updateMenu()
 }
@@ -414,12 +429,8 @@ func formatAge(updatedAt time.Time) string {
 func (app *App) updateMenu() {
 	log.Printf("Updating menu with %d incoming and %d outgoing PRs", len(app.incoming), len(app.outgoing))
 
-	// Clear existing menu items
-	for _, item := range app.menuItems {
-		if item != nil {
-			item.Hide()
-		}
-	}
+	// Store the current menu items to clean up later
+	oldMenuItems := app.menuItems
 	app.menuItems = nil
 
 	// Calculate counts first
@@ -550,6 +561,14 @@ func (app *App) updateMenu() {
 		log.Println("Quit requested by user")
 		systray.Quit()
 	})
+
+	// Now hide old menu items after new ones are created
+	// This prevents the flicker by ensuring new items exist before old ones disappear
+	for _, item := range oldMenuItems {
+		if item != nil {
+			item.Hide()
+		}
+	}
 }
 
 type cacheEntry struct {
@@ -611,4 +630,31 @@ func getIcon() []byte {
 		0xA3, 0x60, 0x14, 0x8C, 0x02, 0x08, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
 		0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 	}
+}
+
+func (app *App) loadLogoIcon() []byte {
+	// When running from app bundle, we need to find the resources
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Printf("Failed to get executable path: %v", err)
+		return nil
+	}
+	
+	// Try multiple possible paths
+	possiblePaths := []string{
+		// Development: relative to working directory (use pre-sized icon)
+		"out/menubar-icon.png",
+		// App bundle: in Resources directory
+		filepath.Join(filepath.Dir(execPath), "..", "Resources", "menubar-icon.png"),
+	}
+	
+	for _, path := range possiblePaths {
+		if data, err := os.ReadFile(path); err == nil {
+			log.Printf("Successfully loaded logo icon from %s", path)
+			return data
+		}
+	}
+	
+	log.Printf("Could not find logo icon in any of the expected paths")
+	return nil
 }
