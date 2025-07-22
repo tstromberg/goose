@@ -15,32 +15,24 @@ The smartest PR tracker that knows when you're actually blocking someone - not j
 - **"Which PR should I review first?"** - Smart prioritization shows you what matters most.
 - **"I hate context switching to check PRs"** - Stay in your flow. Check without leaving your work.
 
-## Quick Start (2 minutes) ⚡
+## Quick Start ⚡
 
-**Prerequisites:** Just GitHub CLI (`gh`)
 ```bash
-# Don't have it? Install in seconds:
-brew install gh  # macOS
-# or visit: https://cli.github.com/
-
-# Authenticate once:
+# Install dependencies if you don't have them:
+brew install gh go  # macOS (or visit https://cli.github.com and https://go.dev)
 gh auth login
+
+# Install & run Ready to Review:
+git clone https://github.com/turn-systems/pr-menubar.git && cd pr-menubar && make run
 ```
 
-**Install & Run:**
-```bash
-git clone https://github.com/turn-systems/pr-menubar.git
-cd pr-menubar
-make run  # That's it! 🎉
-```
-
+That's it! The app appears in your menubar showing your PR count. Click to see all PRs with smart prioritization.
 
 **Perfect for:**
 - ✅ Teams doing 10+ PRs/week
 - ✅ Open-source contributors
 - ✅ Remote/async teams across timezones
 - ✅ Anyone who's ever felt guilty about blocking a PR
-- ✅ Engineers who value focus time but want to be responsive
 
 ## Why Not Just GitHub Notifications? 🤔
 
@@ -50,7 +42,6 @@ GitHub notifications are noisy and overwhelming. Ready to Review is different:
 - **Test-Aware**: Waits for tests to pass before alerting you - no more reviewing broken PRs
 - **Context-Aware**: Knows when someone explicitly asked for your help vs. automatic assignment
 - **Zero Noise**: No pings for PRs that aren't actually blocked on you
-- **Visual Status**: See your PR count without clicking - know at a glance if you're blocking someone
 
 ## How It Works ✨
 
@@ -59,71 +50,48 @@ Ready to Review displays a simple counter in your menubar: `incoming / outgoing`
 - **Incoming** 📥: PRs from teammates waiting for your review
 - **Outgoing** 📤: Your PRs waiting on others
 
-Click to see all PRs instantly. Blocked ones are marked with ❗ so you know what's urgent. One more click opens any PR in your browser.
+Blocked PRs are marked with ❗. Click any PR to open it in your browser.
 
-### Bonus: Auto-Start Magic! 🌟
+### Auto-Start (macOS) 🌟
 
-On macOS, right-click the menubar icon and toggle "Launch at Login". Set it once, never think about it again!
+Right-click the menubar icon and toggle "Launch at Login". Never think about it again!
 
-## Get Started in 1 minute 🚀
+## Authentication & Privacy 🔐
 
+Ready to Review uses your GitHub CLI token (`gh auth token`) to:
+- Fetch your PRs from GitHub
+- Authenticate with our API server which intelligently determines when you're actually blocking a PR
+
+**Your token never gets stored on our servers** - we use it for the request, then forget about it.
+
+## Installation Options
+
+**Quick Install** (recommended):
 ```bash
-# Copy, paste, done:
-git clone https://github.com/turn-systems/pr-menubar.git && cd pr-menubar && make run
+make run  # On macOS: installs to /Applications and launches
 ```
 
-**What happens next:**
-1. ✅ App appears in your menubar
-2. ✅ Shows your PR count immediately
-3. ✅ Click to see all PRs with smart prioritization
-4. ✅ Enable auto-start and never think about it again
-
-## Technical Details 🔧
-
-<details>
-<summary>Authentication & Privacy</summary>
-
-Ready to Review uses the GitHub token from `gh auth token` to authenticate with both GitHub and our Ready to Review API server.
-
-**How it works:**
-- We grab your existing GitHub CLI token (no extra logins!)
-- Use it to fetch your PRs from GitHub
-- Also use it to authenticate with our API server which intelligently determines when you're actually blocking a PR (tests passing, explicit requests, etc.)
-- **Your token never gets stored on our servers** - we use it for the magic, then forget about it 🤐
-
-</details>
-
-<details>
-<summary>Platform-Specific Installation</summary>
-
-**The Traditional Way:**
+**Traditional Install**:
 ```bash
-make install  # Installs to the right place for your OS
+make install  # Installs to the right place for your OS:
+             # macOS: /Applications/Ready to Review.app
+             # Linux/BSD: /usr/local/bin/ready-to-review  
+             # Windows: %LOCALAPPDATA%\Programs\ready-to-review
 ```
 
-**Platform Magic:**
-- **macOS** 🍎: Installs a proper app bundle to `/Applications`
-- **Linux/BSD** 🐧: Drops the binary in `/usr/local/bin`
-- **Windows** 🪟: Tucks it away in `%LOCALAPPDATA%\Programs\ready-to-review`
-
-**Just Browsing?**
+**Build Only**:
 ```bash
-# Build without installing
-make build
-
-# macOS folks: create a fancy app bundle
-make app-bundle
+make build        # Build for current platform
+make app-bundle   # macOS: create .app bundle
 ```
 
-</details>
-
-<details>
-<summary>Requirements</summary>
-
-- Go 1.21+ (only needed for building from source)
+**Requirements**:
 - GitHub CLI (`gh`) installed and authenticated
+- Go 1.21+ (for building from source)
 
-</details>
+## Contributing 🤝
+
+Open-source contributions are welcome! Got an idea? Send a PR and we'll ship it. It's that simple.
 
 ---
 
@@ -132,11 +100,5 @@ make app-bundle
 No more blocked PRs. No more forgotten reviews. Just smooth, efficient collaboration.
 
 [⬇️ Download Now](https://github.com/turn-systems/pr-menubar/releases) | [📖 Docs](https://github.com/turn-systems/pr-menubar/wiki) | [🐛 Report Issue](https://github.com/turn-systems/pr-menubar/issues)
-
-## Contributing 🤝
-
-Open-source contributions are welcome! Got an idea? Send a PR and we'll ship it. It's that simple.
-
----
 
 Built with ❤️ by [CodeGroove](https://codegroove.dev/products/) for teams who ship fast.
