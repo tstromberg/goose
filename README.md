@@ -54,7 +54,7 @@ Blocked PRs are marked with ❗. Click any PR to open it in your browser.
 
 ### Auto-Start (macOS) 🌟
 
-Right-click the menubar icon and toggle "Launch at Login". Never think about it again!
+Click the menubar icon and toggle "Start at Login". Never think about it again!
 
 ## Authentication & Privacy 🔐
 
@@ -62,7 +62,7 @@ Ready to Review uses your GitHub CLI token (`gh auth token`) to:
 - Fetch your PRs from GitHub
 - Authenticate with our API server which intelligently determines when you're actually blocking a PR
 
-**Your token never gets stored on our servers** - we use it for the request, then forget about it.
+**Your token never gets stored on our servers** - we use it to make GitHub API requests, then forget about it.
 
 ## Installation Options
 
@@ -75,7 +75,7 @@ make run  # On macOS: installs to /Applications and launches
 ```bash
 make install  # Installs to the right place for your OS:
              # macOS: /Applications/Ready to Review.app
-             # Linux/BSD: /usr/local/bin/ready-to-review  
+             # Linux/BSD: /usr/local/bin/ready-to-review
              # Windows: %LOCALAPPDATA%\Programs\ready-to-review
 ```
 
@@ -98,7 +98,5 @@ Open-source contributions are welcome! Got an idea? Send a PR and we'll ship it.
 ### 🌟 Make Your Team Happier Today
 
 No more blocked PRs. No more forgotten reviews. Just smooth, efficient collaboration.
-
-[⬇️ Download Now](https://github.com/turn-systems/pr-menubar/releases) | [📖 Docs](https://github.com/turn-systems/pr-menubar/wiki) | [🐛 Report Issue](https://github.com/turn-systems/pr-menubar/issues)
 
 Built with ❤️ by [CodeGroove](https://codegroove.dev/products/) for teams who ship fast.
