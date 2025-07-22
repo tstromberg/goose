@@ -13,7 +13,13 @@ deps:
 
 # Run the application
 run:
+ifeq ($(shell uname),Darwin)
+	@$(MAKE) install
+	@echo "Running $(BUNDLE_NAME) from /Applications..."
+	@open "/Applications/$(BUNDLE_NAME).app"
+else
 	go run .
+endif
 
 # Build for current platform
 build:

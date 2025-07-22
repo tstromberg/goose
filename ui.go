@@ -266,6 +266,9 @@ func (app *App) updateMenu() {
 
 	systray.AddSeparator()
 
+	// Add login item option (macOS only)
+	addLoginItemUI(app)
+
 	// Quit
 	quitItem := systray.AddMenuItem("Quit", "")
 	app.menuItems = append(app.menuItems, quitItem)
