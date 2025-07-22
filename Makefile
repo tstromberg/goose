@@ -13,14 +13,14 @@ deps:
 
 # Run the application
 run:
-	go run main.go
+	go run .
 
 # Build for current platform
 build:
 ifeq ($(OS),Windows_NT)
-	CGO_ENABLED=1 go build -ldflags -H=windowsgui -o $(APP_NAME).exe main.go
+	CGO_ENABLED=1 go build -ldflags -H=windowsgui -o $(APP_NAME).exe .
 else
-	CGO_ENABLED=1 go build -o $(APP_NAME) main.go
+	CGO_ENABLED=1 go build -o $(APP_NAME) .
 endif
 
 # Build for all platforms
@@ -28,18 +28,18 @@ build-all: build-darwin build-linux build-windows
 
 # Build for macOS
 build-darwin:
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o out/$(APP_NAME)-darwin-amd64 main.go
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o out/$(APP_NAME)-darwin-arm64 main.go
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o out/$(APP_NAME)-darwin-amd64 .
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o out/$(APP_NAME)-darwin-arm64 .
 
 # Build for Linux
 build-linux:
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o out/$(APP_NAME)-linux-amd64 main.go
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -o out/$(APP_NAME)-linux-arm64 main.go
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o out/$(APP_NAME)-linux-amd64 .
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -o out/$(APP_NAME)-linux-arm64 .
 
 # Build for Windows
 build-windows:
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-amd64.exe main.go
-	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-arm64.exe main.go
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-amd64.exe .
+	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-arm64.exe .
 
 # Clean build artifacts
 clean:
