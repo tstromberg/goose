@@ -1,3 +1,4 @@
+// Package main - github.go contains GitHub API integration functions.
 package main
 
 import (

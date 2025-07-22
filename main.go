@@ -160,7 +160,7 @@ func (app *App) updatePRs() {
 	}
 
 	// Check for newly blocked PRs
-	newlyBlockedPRs := []PR{}
+	var newlyBlockedPRs []PR
 	currentBlockedPRs := make(map[string]bool)
 
 	// Check incoming PRs

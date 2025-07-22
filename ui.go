@@ -1,3 +1,4 @@
+// Package main - ui.go handles system tray UI and menu management.
 package main
 
 import (
