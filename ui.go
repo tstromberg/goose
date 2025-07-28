@@ -121,7 +121,7 @@ func (app *App) updateMenu() {
 
 	app.mu.RLock()
 	for _, pr := range app.incoming {
-		if app.showStaleIncoming || !isStale(pr.UpdatedAt) {
+		if !app.hideStaleIncoming || !isStale(pr.UpdatedAt) {
 			incomingCount++
 			if pr.NeedsReview {
 				incomingBlocked++
@@ -132,11 +132,12 @@ func (app *App) updateMenu() {
 	outgoingBlocked := 0
 	outgoingCount := 0
 	for _, pr := range app.outgoing {
-		if pr.IsBlocked {
-			outgoingBlocked++
+		if !app.hideStaleIncoming || !isStale(pr.UpdatedAt) {
+			outgoingCount++
+			if pr.IsBlocked {
+				outgoingBlocked++
+			}
 		}
-		// Count all outgoing PRs
-		outgoingCount++
 	}
 	app.mu.RUnlock()
 
@@ -163,7 +164,7 @@ func (app *App) updateMenu() {
 
 		for _, pr := range prs {
 			// Apply filters
-			if !app.showStaleIncoming && isStale(pr.UpdatedAt) {
+			if app.hideStaleIncoming && isStale(pr.UpdatedAt) {
 				continue
 			}
 			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
@@ -204,7 +205,10 @@ func (app *App) updateMenu() {
 		app.mu.RUnlock()
 
 		for _, pr := range prs {
-			// No filters for outgoing PRs
+			// Apply stale filter to outgoing PRs
+			if app.hideStaleIncoming && isStale(pr.UpdatedAt) {
+				continue
+			}
 			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
 			if pr.IsBlocked {
 				title = fmt.Sprintf("%s 🚀", title)
@@ -226,20 +230,22 @@ func (app *App) updateMenu() {
 
 	systray.AddSeparator()
 
-	// Show stale incoming
-	showStaleIncomingItem := systray.AddMenuItem("Show stale PRs (>90 days)", "")
-	app.menuItems = append(app.menuItems, showStaleIncomingItem)
-	if !app.showStaleIncoming {
-		showStaleIncomingItem.Check()
+	// Hide stale PRs
+	hideStaleItem := systray.AddMenuItem("Hide stale PRs (>90 days)", "")
+	app.menuItems = append(app.menuItems, hideStaleItem)
+	if app.hideStaleIncoming {
+		hideStaleItem.Check()
 	}
-	showStaleIncomingItem.Click(func() {
-		app.showStaleIncoming = !app.showStaleIncoming
-		if app.showStaleIncoming {
-			showStaleIncomingItem.Check()
+	hideStaleItem.Click(func() {
+		app.hideStaleIncoming = !app.hideStaleIncoming
+		if app.hideStaleIncoming {
+			hideStaleItem.Check()
 		} else {
-			showStaleIncomingItem.Uncheck()
+			hideStaleItem.Uncheck()
 		}
-		log.Printf("Show stale incoming: %v", app.showStaleIncoming)
+		log.Printf("Hide stale PRs: %v", app.hideStaleIncoming)
+		// Force menu rebuild since hideStaleIncoming changed
+		app.lastMenuHash = ""
 		app.updateMenu()
 	})
 

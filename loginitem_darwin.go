@@ -75,13 +75,13 @@ func isRunningFromAppBundle() bool {
 	if err != nil {
 		return false
 	}
-	
+
 	// Resolve any symlinks
 	execPath, err = filepath.EvalSymlinks(execPath)
 	if err != nil {
 		return false
 	}
-	
+
 	// Check if we're running from an app bundle
 	// App bundles have the structure: /path/to/App.app/Contents/MacOS/executable
 	return strings.Contains(execPath, ".app/Contents/MacOS/")
@@ -122,19 +122,19 @@ func addLoginItemUI(app *App) {
 		log.Println("Hiding 'Start at Login' menu item - not running from app bundle")
 		return
 	}
-	
+
 	loginItem := systray.AddMenuItem("Start at Login", "Automatically start when you log in")
 	app.menuItems = append(app.menuItems, loginItem)
-	
+
 	// Set initial state
 	if isLoginItem() {
 		loginItem.Check()
 	}
-	
+
 	loginItem.Click(func() {
 		isEnabled := isLoginItem()
 		newState := !isEnabled
-		
+
 		if err := setLoginItem(newState); err != nil {
 			log.Printf("Failed to set login item: %v", err)
 			// Revert the UI state on error
@@ -145,7 +145,7 @@ func addLoginItemUI(app *App) {
 			}
 			return
 		}
-		
+
 		// Update UI state
 		if newState {
 			loginItem.Check()

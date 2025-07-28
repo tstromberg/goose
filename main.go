@@ -6,11 +6,13 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,8 +62,9 @@ type App struct {
 	outgoing           []PR
 	menuItems          []*systray.MenuItem
 	cacheDir           string
-	showStaleIncoming  bool
+	hideStaleIncoming  bool
 	previousBlockedPRs map[string]bool // Track previously blocked PRs by URL
+	lastMenuHash       string          // Hash of last menu state to detect changes
 	mu                 sync.RWMutex    // Protects concurrent access to PR data
 }
 
@@ -81,7 +84,7 @@ func main() {
 	app := &App{
 		ctx:                context.Background(),
 		cacheDir:           cacheDir,
-		showStaleIncoming:  false,
+		hideStaleIncoming:  true,
 		previousBlockedPRs: make(map[string]bool),
 	}
 
@@ -212,8 +215,8 @@ func (app *App) updatePRs() {
 
 	app.mu.RLock()
 	for _, pr := range app.incoming {
-		// Skip stale PRs if not showing them
-		if !app.showStaleIncoming && isStale(pr.UpdatedAt) {
+		// Skip stale PRs if hiding them
+		if app.hideStaleIncoming && isStale(pr.UpdatedAt) {
 			continue
 		}
 		if pr.NeedsReview {
@@ -222,6 +225,10 @@ func (app *App) updatePRs() {
 	}
 
 	for _, pr := range app.outgoing {
+		// Skip stale PRs if hiding them
+		if app.hideStaleIncoming && isStale(pr.UpdatedAt) {
+			continue
+		}
 		if pr.IsBlocked {
 			outgoingBlocked++
 		}
@@ -238,10 +245,54 @@ func (app *App) updatePRs() {
 		systray.SetTitle(fmt.Sprintf("0/%d 🚀", outgoingBlocked))
 	}
 
-	app.updateMenu()
+	app.updateMenuIfChanged()
 }
 
 // isStale returns true if the PR hasn't been updated in over 90 days
 func isStale(updatedAt time.Time) bool {
 	return time.Since(updatedAt) > stalePRThreshold
+}
+
+// generateMenuHash creates a hash of the current menu state to detect changes
+func (app *App) generateMenuHash() string {
+	var builder strings.Builder
+
+	app.mu.RLock()
+	defer app.mu.RUnlock()
+
+	// Include hideStaleIncoming setting
+	builder.WriteString(fmt.Sprintf("hide:%v|", app.hideStaleIncoming))
+
+	// Hash incoming PRs (filtered by stale setting)
+	builder.WriteString("incoming:")
+	for _, pr := range app.incoming {
+		if !app.hideStaleIncoming || !isStale(pr.UpdatedAt) {
+			builder.WriteString(fmt.Sprintf("%d:%s:%v:%s|", pr.ID, pr.Repository, pr.NeedsReview, pr.Size))
+		}
+	}
+
+	// Hash outgoing PRs (filtered by stale setting)
+	builder.WriteString("outgoing:")
+	for _, pr := range app.outgoing {
+		if !app.hideStaleIncoming || !isStale(pr.UpdatedAt) {
+			builder.WriteString(fmt.Sprintf("%d:%s:%v|", pr.ID, pr.Repository, pr.IsBlocked))
+		}
+	}
+
+	// Generate SHA256 hash
+	hash := sha256.Sum256([]byte(builder.String()))
+	return fmt.Sprintf("%x", hash)
+}
+
+// updateMenuIfChanged only rebuilds the menu if the PR data has actually changed
+func (app *App) updateMenuIfChanged() {
+	currentHash := app.generateMenuHash()
+	if currentHash == app.lastMenuHash {
+		log.Println("Menu data unchanged, skipping menu rebuild")
+		return
+	}
+
+	log.Println("Menu data changed, rebuilding menu")
+	app.lastMenuHash = currentHash
+	app.updateMenu()
 }
