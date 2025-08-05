@@ -7,8 +7,8 @@ import (
 
 func TestIsStale(t *testing.T) {
 	tests := []struct {
-		name     string
 		time     time.Time
+		name     string
 		expected bool
 	}{
 		{

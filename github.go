@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/codeGROOVE-dev/retry"
 	"github.com/google/go-github/v57/github"
 	"github.com/ready-to-review/turnclient/pkg/turn"
 	"golang.org/x/oauth2"
@@ -118,6 +120,7 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 }
 
 // fetchPRs retrieves all PRs involving the current user.
+// It returns GitHub data immediately and starts Turn API queries in the background.
 func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err error) {
 	// Use targetUser if specified, otherwise use authenticated user
 	user := app.currentUser.GetLogin()
@@ -138,13 +141,40 @@ func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err
 	log.Printf("Searching for PRs with query: %s", query)
 	searchStart := time.Now()
 
-	// Just try once - GitHub API is reliable enough
-	result, resp, err := app.client.Search.Issues(ctx, query, opts)
+	// Create timeout context for GitHub API call
+	githubCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	result, resp, err := app.client.Search.Issues(githubCtx, query, opts)
 	if err != nil {
-		// Check for rate limit
-		const httpStatusForbidden = 403
-		if resp != nil && resp.StatusCode == httpStatusForbidden {
-			log.Print("GitHub API rate limited")
+		// Enhanced error handling with specific cases
+		if resp != nil {
+			const (
+				httpStatusUnauthorized  = 401
+				httpStatusForbidden     = 403
+				httpStatusUnprocessable = 422
+			)
+			switch resp.StatusCode {
+			case httpStatusForbidden:
+				if resp.Header.Get("X-Ratelimit-Remaining") == "0" {
+					resetTime := resp.Header.Get("X-Ratelimit-Reset")
+					log.Printf("GitHub API rate limited, reset at: %s", resetTime)
+					return nil, nil, fmt.Errorf("github API rate limited, try again later: %w", err)
+				}
+				log.Print("GitHub API access forbidden (check token permissions)")
+				return nil, nil, fmt.Errorf("github API access forbidden: %w", err)
+			case httpStatusUnauthorized:
+				log.Print("GitHub API authentication failed (check token)")
+				return nil, nil, fmt.Errorf("github API authentication failed: %w", err)
+			case httpStatusUnprocessable:
+				log.Printf("GitHub API query invalid: %s", query)
+				return nil, nil, fmt.Errorf("github API query invalid: %w", err)
+			default:
+				log.Printf("GitHub API error (status %d): %v", resp.StatusCode, err)
+			}
+		} else {
+			// Likely network error
+			log.Printf("GitHub API network error: %v", err)
 		}
 		return nil, nil, fmt.Errorf("search PRs: %w", err)
 	}
@@ -157,10 +187,7 @@ func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err
 		result.Issues = result.Issues[:maxPRsToProcess]
 	}
 
-	// Process results
-	turnSuccesses := 0
-	turnFailures := 0
-
+	// Process GitHub results immediately
 	for _, issue := range result.Issues {
 		if !issue.IsPullRequest() {
 			continue
@@ -175,28 +202,188 @@ func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err
 			UpdatedAt:  issue.GetUpdatedAt().Time,
 		}
 
-		// Get Turn API data with caching
-		turnData, err := app.turnData(ctx, issue.GetHTMLURL(), issue.GetUpdatedAt().Time)
-		if err == nil && turnData != nil && turnData.PRState.UnblockAction != nil {
-			turnSuccesses++
-			if _, exists := turnData.PRState.UnblockAction[user]; exists {
-				pr.NeedsReview = true
-			}
-		} else if err != nil {
-			turnFailures++
-		}
-
 		// Categorize as incoming or outgoing
 		// When viewing another user's PRs, we're looking at it from their perspective
 		if issue.GetUser().GetLogin() == user {
-			pr.IsBlocked = pr.NeedsReview
 			outgoing = append(outgoing, pr)
 		} else {
 			incoming = append(incoming, pr)
 		}
 	}
 
-	log.Printf("Found %d incoming, %d outgoing PRs (Turn API: %d/%d succeeded)",
-		len(incoming), len(outgoing), turnSuccesses, turnSuccesses+turnFailures)
+	log.Printf("[GITHUB] Found %d incoming, %d outgoing PRs from GitHub", len(incoming), len(outgoing))
+	for _, pr := range incoming {
+		log.Printf("[GITHUB] Incoming PR: %s", pr.URL)
+	}
+	for _, pr := range outgoing {
+		log.Printf("[GITHUB] Outgoing PR: %s", pr.URL)
+	}
+
+	// Start Turn API queries in background
+	go app.fetchTurnDataAsync(ctx, result.Issues, user)
+
 	return incoming, outgoing, nil
+}
+
+// updatePRData updates PR data with Turn API results.
+func (app *App) updatePRData(url string, needsReview bool, isOwner bool) *PR {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if isOwner {
+		// Update outgoing PRs
+		for i := range app.outgoing {
+			if app.outgoing[i].URL == url {
+				app.outgoing[i].NeedsReview = needsReview
+				app.outgoing[i].IsBlocked = needsReview
+				return &app.outgoing[i]
+			}
+		}
+	} else {
+		// Update incoming PRs
+		for i := range app.incoming {
+			if app.incoming[i].URL == url {
+				app.incoming[i].NeedsReview = needsReview
+				return &app.incoming[i]
+			}
+		}
+	}
+	return nil
+}
+
+// fetchTurnDataAsync fetches Turn API data in the background and updates PRs as results arrive.
+func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, user string) {
+	// Set loading state
+	app.mu.Lock()
+	app.turnDataLoading = true
+	app.mu.Unlock()
+
+	// Update section headers to show loading state
+	log.Print("[TURN] Starting Turn API queries, updating section headers to show loading state")
+	app.updateSectionHeaders()
+
+	turnStart := time.Now()
+	type prResult struct {
+		err      error
+		turnData *turn.CheckResponse
+		url      string
+		isOwner  bool
+	}
+
+	// Create a channel for results
+	results := make(chan prResult, len(issues))
+
+	// Use a WaitGroup to track goroutines
+	var wg sync.WaitGroup
+
+	// Process PRs in parallel
+	for _, issue := range issues {
+		if !issue.IsPullRequest() {
+			continue
+		}
+
+		wg.Add(1)
+		go func(issue *github.Issue) {
+			defer wg.Done()
+
+			// Retry logic for Turn API with exponential backoff and jitter
+			var turnData *turn.CheckResponse
+			var err error
+
+			turnData, err = retry.DoWithData(
+				func() (*turn.CheckResponse, error) {
+					data, apiErr := app.turnData(ctx, issue.GetHTMLURL(), issue.GetUpdatedAt().Time)
+					if apiErr != nil {
+						log.Printf("Turn API attempt failed for %s: %v", issue.GetHTMLURL(), apiErr)
+					}
+					return data, apiErr
+				},
+				retry.Context(ctx),
+				retry.Attempts(5),                             // 5 attempts max
+				retry.Delay(500*time.Millisecond),             // Start with 500ms
+				retry.MaxDelay(30*time.Second),                // Cap at 30 seconds
+				retry.DelayType(retry.FullJitterBackoffDelay), // Exponential backoff with jitter
+				retry.OnRetry(func(attempt uint, err error) {
+					log.Printf("Turn API retry attempt %d for %s: %v", attempt, issue.GetHTMLURL(), err)
+				}),
+			)
+			if err != nil {
+				log.Printf("Turn API failed after all retries for %s: %v", issue.GetHTMLURL(), err)
+			}
+
+			results <- prResult{
+				url:      issue.GetHTMLURL(),
+				turnData: turnData,
+				err:      err,
+				isOwner:  issue.GetUser().GetLogin() == user,
+			}
+		}(issue)
+	}
+
+	// Close the results channel when all goroutines are done
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results and update PRs incrementally
+	turnSuccesses := 0
+	turnFailures := 0
+	updatesApplied := 0
+
+	// Batch updates to reduce menu rebuilds
+	updateBatch := 0
+	const batchSize = 10
+	lastUpdateTime := time.Now()
+	const minUpdateInterval = 500 * time.Millisecond
+
+	for result := range results {
+		if result.err == nil && result.turnData != nil && result.turnData.PRState.UnblockAction != nil {
+			turnSuccesses++
+
+			// Check if user needs to review
+			needsReview := false
+			if _, exists := result.turnData.PRState.UnblockAction[user]; exists {
+				needsReview = true
+			}
+
+			// Update the PR in our lists
+			pr := app.updatePRData(result.url, needsReview, result.isOwner)
+
+			if pr != nil {
+				updatesApplied++
+				updateBatch++
+				log.Printf("[TURN] Turn data received for %s (needsReview=%v)", result.url, needsReview)
+				// Update the specific menu item immediately
+				app.updatePRMenuItem(*pr)
+
+				// Periodically update section headers and tray title
+				if updateBatch >= batchSize || time.Since(lastUpdateTime) >= minUpdateInterval {
+					log.Printf("[TURN] Batch update threshold reached (%d updates), updating headers and title", updateBatch)
+					app.updateSectionHeaders()
+					app.setTrayTitle()
+					updateBatch = 0
+					lastUpdateTime = time.Now()
+				}
+			}
+		} else if result.err != nil {
+			turnFailures++
+		}
+	}
+
+	// Clear loading state
+	app.mu.Lock()
+	app.turnDataLoading = false
+	app.turnDataLoaded = true
+	app.mu.Unlock()
+
+	log.Printf("[TURN] Turn API queries completed in %v (%d/%d succeeded, %d PRs updated)",
+		time.Since(turnStart), turnSuccesses, turnSuccesses+turnFailures, updatesApplied)
+
+	// Update section headers with final counts
+	log.Print("[TURN] Updating section headers and tray title with final counts")
+	app.updateSectionHeaders()
+
+	// Update tray title
+	app.setTrayTitle()
 }

@@ -114,8 +114,12 @@ func (app *App) countPRs() (int, int, int, int) {
 
 	var incomingCount, incomingBlocked, outgoingCount, outgoingBlocked int
 
+	// Pre-calculate stale threshold to avoid repeated time calculations
+	now := time.Now()
+	staleThreshold := now.Add(-stalePRThreshold)
+
 	for i := range app.incoming {
-		if !app.hideStaleIncoming || !isStale(app.incoming[i].UpdatedAt) {
+		if !app.hideStaleIncoming || app.incoming[i].UpdatedAt.After(staleThreshold) {
 			incomingCount++
 			if app.incoming[i].NeedsReview {
 				incomingBlocked++
@@ -124,7 +128,7 @@ func (app *App) countPRs() (int, int, int, int) {
 	}
 
 	for i := range app.outgoing {
-		if !app.hideStaleIncoming || !isStale(app.outgoing[i].UpdatedAt) {
+		if !app.hideStaleIncoming || app.outgoing[i].UpdatedAt.After(staleThreshold) {
 			outgoingCount++
 			if app.outgoing[i].IsBlocked {
 				outgoingBlocked++
@@ -134,7 +138,74 @@ func (app *App) countPRs() (int, int, int, int) {
 	return incomingCount, incomingBlocked, outgoingCount, outgoingBlocked
 }
 
+// setTrayTitle updates the system tray title based on PR counts and loading state.
+func (app *App) setTrayTitle() {
+	app.mu.RLock()
+	loading := app.turnDataLoading
+	app.mu.RUnlock()
+
+	_, incomingBlocked, _, outgoingBlocked := app.countPRs()
+
+	if loading && !app.turnDataLoaded {
+		// Initial load - show loading indicator
+		systray.SetTitle("...")
+		return
+	}
+
+	// Set title based on PR state
+	switch {
+	case incomingBlocked == 0 && outgoingBlocked == 0:
+		systray.SetTitle("😊")
+	case incomingBlocked > 0 && outgoingBlocked > 0:
+		systray.SetTitle(fmt.Sprintf("🕵️ %d / 🚀 %d", incomingBlocked, outgoingBlocked))
+	case incomingBlocked > 0:
+		systray.SetTitle(fmt.Sprintf("🕵️ %d", incomingBlocked))
+	default:
+		systray.SetTitle(fmt.Sprintf("🚀 %d", outgoingBlocked))
+	}
+}
+
+// updateSectionHeaders updates the section headers with current blocked counts.
+func (app *App) updateSectionHeaders() {
+	_, incomingBlocked, _, outgoingBlocked := app.countPRs()
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if incomingHeader, exists := app.sectionHeaders["Incoming"]; exists {
+		headerText := fmt.Sprintf("Incoming — %d blocked on you", incomingBlocked)
+		log.Printf("[MENU] Updating section header 'Incoming': %s", headerText)
+		incomingHeader.SetTitle(headerText)
+	}
+
+	if outgoingHeader, exists := app.sectionHeaders["Outgoing"]; exists {
+		headerText := fmt.Sprintf("Outgoing — %d blocked on you", outgoingBlocked)
+		log.Printf("[MENU] Updating section header 'Outgoing': %s", headerText)
+		outgoingHeader.SetTitle(headerText)
+	}
+}
+
+// updatePRMenuItem updates an existing PR menu item with new data.
+func (app *App) updatePRMenuItem(pr PR) {
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	if item, exists := app.prMenuItems[pr.URL]; exists {
+		oldTitle := item.String()
+		title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
+		// Add bullet point for PRs where user is blocking
+		if pr.NeedsReview {
+			title = fmt.Sprintf("• %s", title)
+		}
+		log.Printf("[MENU] Updating PR menu item for %s: '%s' -> '%s'", pr.URL, oldTitle, title)
+		item.SetTitle(title)
+	} else {
+		log.Printf("[MENU] WARNING: Tried to update non-existent PR menu item for %s", pr.URL)
+	}
+}
+
 // addPRMenuItem adds a menu item for a pull request.
+// NOTE: Caller must hold app.mu.Lock() when calling this function.
 func (app *App) addPRMenuItem(ctx context.Context, pr PR, _ bool) {
 	title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
 	// Add bullet point for PRs where user is blocking
@@ -142,8 +213,22 @@ func (app *App) addPRMenuItem(ctx context.Context, pr PR, _ bool) {
 		title = fmt.Sprintf("• %s", title)
 	}
 	tooltip := fmt.Sprintf("%s (%s)", pr.Title, formatAge(pr.UpdatedAt))
+
+	// Check if menu item already exists
+	if existingItem, exists := app.prMenuItems[pr.URL]; exists {
+		// Update existing menu item and ensure it's visible
+		log.Printf("[MENU] PR menu item already exists for %s, updating title to '%s' and showing", pr.URL, title)
+		existingItem.SetTitle(title)
+		existingItem.SetTooltip(tooltip)
+		existingItem.Show() // Make sure it's visible if it was hidden
+		return
+	}
+
+	// Create new menu item
+	log.Printf("[MENU] Creating new PR menu item for %s: '%s'", pr.URL, title)
 	item := systray.AddMenuItem(title, tooltip)
 	app.menuItems = append(app.menuItems, item)
+	app.prMenuItems[pr.URL] = item
 
 	// Capture URL and context properly to avoid loop variable capture bug
 	item.Click(func(capturedCtx context.Context, url string) func() {
@@ -162,11 +247,34 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	}
 
 	// Add header
-	header := systray.AddMenuItem(fmt.Sprintf("%s — %d blocked on you", sectionTitle, blockedCount), "")
-	header.Disable()
-	app.menuItems = append(app.menuItems, header)
+	var headerText string
+	app.mu.RLock()
+	loading := app.turnDataLoading
+	app.mu.RUnlock()
 
-	// Add PR items (already protected by mutex in caller)
+	if loading && !app.turnDataLoaded {
+		headerText = fmt.Sprintf("%s — <loading> blocked on you", sectionTitle)
+	} else {
+		headerText = fmt.Sprintf("%s — %d blocked on you", sectionTitle, blockedCount)
+	}
+
+	// Check if header already exists (need to protect sectionHeaders access)
+	app.mu.Lock()
+	existingHeader, exists := app.sectionHeaders[sectionTitle]
+	if exists {
+		// Update existing header
+		log.Printf("[MENU] Section header already exists for '%s', updating to '%s'", sectionTitle, headerText)
+		existingHeader.SetTitle(headerText)
+	} else {
+		// Create new header
+		log.Printf("[MENU] Creating new section header '%s': '%s'", sectionTitle, headerText)
+		header := systray.AddMenuItem(headerText, "")
+		header.Disable()
+		app.menuItems = append(app.menuItems, header)
+		app.sectionHeaders[sectionTitle] = header
+	}
+
+	// Add PR items (mutex already held)
 	for i := range prs {
 		// Apply filters
 		if app.hideStaleIncoming && isStale(prs[i].UpdatedAt) {
@@ -174,31 +282,107 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		}
 		app.addPRMenuItem(ctx, prs[i], isOutgoing)
 	}
+
+	app.mu.Unlock()
 }
 
-// updateMenu rebuilds the system tray menu.
+// initializeMenu creates the initial menu structure with static items.
+func (app *App) initializeMenu(ctx context.Context) {
+	log.Print("[MENU] Initializing menu structure")
+
+	// Create initial structure - this should only be called once
+	app.menuItems = nil
+	app.prMenuItems = make(map[string]*systray.MenuItem)
+	app.sectionHeaders = make(map[string]*systray.MenuItem)
+
+	// The menu will be populated by updateMenu
+	app.updateMenu(ctx)
+
+	// Add static items at the end - these never change
+	app.addStaticMenuItems(ctx)
+
+	app.menuInitialized = true
+	log.Print("[MENU] Menu initialization complete")
+}
+
+// updateMenu updates the dynamic parts of the menu (PRs and headers).
 func (app *App) updateMenu(ctx context.Context) {
+	// If menu is already initialized, only allow updates if we're not rebuilding everything
+	if app.menuInitialized {
+		log.Print("[MENU] Menu already initialized, performing incremental update")
+	} else {
+		// Log the call stack to see who's calling updateMenu during initialization
+		log.Print("[MENU] updateMenu called during initialization from:")
+		const maxStackFrames = 5
+		for i := 1; i < maxStackFrames; i++ {
+			pc, file, line, ok := runtime.Caller(i)
+			if !ok {
+				break
+			}
+			fn := runtime.FuncForPC(pc)
+			log.Printf("[MENU]   %s:%d %s", file, line, fn.Name())
+		}
+	}
+
 	app.mu.RLock()
 	incomingLen := len(app.incoming)
 	outgoingLen := len(app.outgoing)
 	app.mu.RUnlock()
 
-	log.Printf("Updating menu with %d incoming and %d outgoing PRs", incomingLen, outgoingLen)
+	log.Printf("[MENU] Updating menu with %d incoming and %d outgoing PRs", incomingLen, outgoingLen)
 
-	// Store the current menu items to clean up later
-	oldMenuItems := app.menuItems
-	app.menuItems = nil
+	// Update tray title
+	app.setTrayTitle()
+
+	// Track which PRs we currently have
+	currentPRURLs := make(map[string]bool)
+	app.mu.RLock()
+	for _, pr := range app.incoming {
+		currentPRURLs[pr.URL] = true
+	}
+	for _, pr := range app.outgoing {
+		currentPRURLs[pr.URL] = true
+	}
+	app.mu.RUnlock()
+
+	// Hide PR menu items that are no longer in the current data
+	app.mu.Lock()
+	for prURL, item := range app.prMenuItems {
+		if !currentPRURLs[prURL] {
+			log.Printf("[MENU] Hiding PR menu item that's no longer in data: %s", prURL)
+			item.Hide()
+			delete(app.prMenuItems, prURL)
+		}
+	}
+	app.mu.Unlock()
 
 	// Calculate counts first
 	incomingCount, incomingBlocked, outgoingCount, outgoingBlocked := app.countPRs()
 
-	// Show "No pull requests" if both lists are empty
+	// Handle "No pull requests" item
+	const noPRsKey = "__no_prs__"
+	app.mu.Lock()
 	if incomingLen == 0 && outgoingLen == 0 {
-		noPRs := systray.AddMenuItem("No pull requests", "")
-		noPRs.Disable()
-		app.menuItems = append(app.menuItems, noPRs)
-		systray.AddSeparator()
+		if noPRItem, exists := app.prMenuItems[noPRsKey]; exists {
+			// Show existing item
+			log.Print("[MENU] Showing existing 'No pull requests' item")
+			noPRItem.Show()
+		} else {
+			// Create new item
+			log.Print("[MENU] Creating 'No pull requests' item")
+			noPRs := systray.AddMenuItem("No pull requests", "")
+			noPRs.Disable()
+			app.menuItems = append(app.menuItems, noPRs)
+			app.prMenuItems[noPRsKey] = noPRs
+		}
+	} else {
+		// Hide "No pull requests" if we have PRs
+		if noPRItem, exists := app.prMenuItems[noPRsKey]; exists {
+			log.Print("[MENU] Hiding 'No pull requests' item")
+			noPRItem.Hide()
+		}
 	}
+	app.mu.Unlock()
 
 	// Incoming section
 	if incomingCount > 0 {
@@ -212,21 +396,17 @@ func (app *App) updateMenu(ctx context.Context) {
 		app.addPRSection(ctx, app.outgoing, "Outgoing", outgoingBlocked, true)
 	}
 
-	// Add static menu items
-	app.addStaticMenuItems(ctx)
-
-	// Now hide old menu items after new ones are created
-	// This prevents the flicker by ensuring new items exist before old ones disappear
-	for _, item := range oldMenuItems {
-		item.Hide()
-	}
+	log.Print("[MENU] Menu update complete")
 }
 
 // addStaticMenuItems adds the static menu items (hide stale, dashboard, about, quit).
 func (app *App) addStaticMenuItems(ctx context.Context) {
+	log.Print("[MENU] Adding static menu items")
+
 	systray.AddSeparator()
 
 	// Hide stale PRs
+	log.Print("[MENU] Adding 'Hide stale PRs' menu item")
 	hideStaleItem := systray.AddMenuItem("Hide stale PRs (>90 days)", "")
 	app.menuItems = append(app.menuItems, hideStaleItem)
 	if app.hideStaleIncoming {
@@ -241,13 +421,14 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		}
 		log.Printf("Hide stale PRs: %v", app.hideStaleIncoming)
 		// Force menu rebuild since hideStaleIncoming changed
-		app.lastMenuHash = ""
+		app.lastMenuHashInt = 0
 		app.updateMenu(ctx)
 	})
 
 	systray.AddSeparator()
 
 	// Dashboard link
+	log.Print("[MENU] Adding 'Dashboard' menu item")
 	dashboardItem := systray.AddMenuItem("Dashboard", "")
 	app.menuItems = append(app.menuItems, dashboardItem)
 	dashboardItem.Click(func() {
@@ -261,6 +442,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	if app.targetUser != "" {
 		aboutText = fmt.Sprintf("About (viewing @%s)", app.targetUser)
 	}
+	log.Printf("[MENU] Adding '%s' menu item", aboutText)
 	aboutItem := systray.AddMenuItem(aboutText, "")
 	app.menuItems = append(app.menuItems, aboutItem)
 	aboutItem.Click(func() {
@@ -276,6 +458,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	addLoginItemUI(ctx, app)
 
 	// Quit
+	log.Print("[MENU] Adding 'Quit' menu item")
 	quitItem := systray.AddMenuItem("Quit", "")
 	app.menuItems = append(app.menuItems, quitItem)
 	quitItem.Click(func() {
