@@ -280,7 +280,7 @@ func (app *App) updateLoop(ctx context.Context) {
 }
 
 func (app *App) updatePRs(ctx context.Context) {
-	incoming, outgoing, err := app.fetchPRs(ctx)
+	incoming, outgoing, err := app.fetchPRsInternal(ctx, false)
 	if err != nil {
 		log.Printf("Error fetching PRs: %v", err)
 		app.mu.Lock()
@@ -531,7 +531,7 @@ func (app *App) updateMenuIfChanged(ctx context.Context) {
 
 // updatePRsWithWait fetches PRs and waits for Turn data before building initial menu.
 func (app *App) updatePRsWithWait(ctx context.Context) {
-	incoming, outgoing, err := app.fetchPRsWithWait(ctx)
+	incoming, outgoing, err := app.fetchPRsInternal(ctx, true)
 	if err != nil {
 		log.Printf("Error fetching PRs: %v", err)
 		app.mu.Lock()
@@ -566,7 +566,10 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		// Still create initial menu even on error
 		if !app.menuInitialized {
 			log.Println("Creating initial menu despite error")
-			app.initializeMenu(ctx)
+			log.Print("[MENU] Initializing menu structure")
+			app.rebuildMenu(ctx)
+			app.menuInitialized = true
+			log.Print("[MENU] Menu initialization complete")
 		}
 		return
 	}
@@ -645,7 +648,10 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	// Create initial menu after first successful data load
 	if !app.menuInitialized {
 		log.Println("Creating initial menu with Turn data")
-		app.initializeMenu(ctx)
+		log.Print("[MENU] Initializing menu structure")
+		app.rebuildMenu(ctx)
+		app.menuInitialized = true
+		log.Print("[MENU] Menu initialization complete")
 	} else {
 		app.updateMenuIfChanged(ctx)
 	}
