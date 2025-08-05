@@ -43,13 +43,14 @@ const (
 
 // PR represents a pull request with metadata.
 type PR struct {
-	UpdatedAt   time.Time
-	Title       string
-	URL         string
-	Repository  string
-	Number      int
-	IsBlocked   bool
-	NeedsReview bool
+	UpdatedAt    time.Time
+	Title        string
+	URL          string
+	Repository   string
+	ActionReason string // Action reason from Turn API when blocked
+	Number       int
+	IsBlocked    bool
+	NeedsReview  bool
 }
 
 // App holds the application state.
@@ -74,12 +75,15 @@ type App struct {
 	turnDataLoading     bool
 	turnDataLoaded      bool
 	menuInitialized     bool
+	noCache             bool
 }
 
 func main() {
 	// Parse command line flags
 	var targetUser string
+	var noCache bool
 	flag.StringVar(&targetUser, "user", "", "GitHub user to query PRs for (defaults to authenticated user)")
+	flag.BoolVar(&noCache, "no-cache", false, "Bypass cache for debugging")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -104,6 +108,7 @@ func main() {
 		targetUser:         targetUser,
 		prMenuItems:        make(map[string]*systray.MenuItem),
 		sectionHeaders:     make(map[string]*systray.MenuItem),
+		noCache:            noCache,
 	}
 
 	log.Println("Initializing GitHub clients...")
