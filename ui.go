@@ -135,14 +135,11 @@ func (app *App) countPRs() (int, int, int, int) {
 }
 
 // addPRMenuItem adds a menu item for a pull request.
-func (app *App) addPRMenuItem(ctx context.Context, pr PR, isOutgoing bool) {
+func (app *App) addPRMenuItem(ctx context.Context, pr PR, _ bool) {
 	title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
-	if (!isOutgoing && pr.NeedsReview) || (isOutgoing && pr.IsBlocked) {
-		if isOutgoing {
-			title = fmt.Sprintf("🚀 %s", title)
-		} else {
-			title = fmt.Sprintf("🕵️ %s", title)
-		}
+	// Add bullet point for PRs where user is blocking
+	if pr.NeedsReview {
+		title = fmt.Sprintf("• %s", title)
 	}
 	tooltip := fmt.Sprintf("%s (%s)", pr.Title, formatAge(pr.UpdatedAt))
 	item := systray.AddMenuItem(title, tooltip)
