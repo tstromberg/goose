@@ -260,7 +260,11 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	})
 
 	// About
-	aboutItem := systray.AddMenuItem("About", "")
+	aboutText := "About"
+	if app.targetUser != "" {
+		aboutText = fmt.Sprintf("About (viewing @%s)", app.targetUser)
+	}
+	aboutItem := systray.AddMenuItem(aboutText, "")
 	app.menuItems = append(app.menuItems, aboutItem)
 	aboutItem.Click(func() {
 		log.Println("GitHub PR Monitor - A system tray app for tracking PR reviews")

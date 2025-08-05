@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -55,6 +56,7 @@ type App struct {
 	lastSuccessfulFetch time.Time
 	turnClient          *turn.Client
 	currentUser         *github.User
+	targetUser          string // User to query PRs for (overrides currentUser if set)
 	previousBlockedPRs  map[string]bool
 	client              *github.Client
 	cacheDir            string
@@ -69,6 +71,11 @@ type App struct {
 }
 
 func main() {
+	// Parse command line flags
+	var targetUser string
+	flag.StringVar(&targetUser, "user", "", "GitHub user to query PRs for (defaults to authenticated user)")
+	flag.Parse()
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Starting GitHub PR Monitor (version=%s, commit=%s, date=%s)", version, commit, date)
 
@@ -88,6 +95,7 @@ func main() {
 		cacheDir:           cacheDir,
 		hideStaleIncoming:  true,
 		previousBlockedPRs: make(map[string]bool),
+		targetUser:         targetUser,
 	}
 
 	log.Println("Initializing GitHub clients...")
@@ -102,6 +110,11 @@ func main() {
 		log.Fatalf("Failed to load current user: %v", err)
 	}
 	app.currentUser = user
+
+	// Log if we're using a different target user
+	if app.targetUser != "" && app.targetUser != user.GetLogin() {
+		log.Printf("Querying PRs for user '%s' instead of authenticated user '%s'", app.targetUser, user.GetLogin())
+	}
 
 	log.Println("Starting systray...")
 	// Create a cancellable context for the application
@@ -118,7 +131,13 @@ func main() {
 func (app *App) onReady(ctx context.Context) {
 	log.Println("System tray ready")
 	systray.SetTitle("Loading PRs...")
-	systray.SetTooltip("GitHub PR Monitor")
+
+	// Set tooltip based on whether we're using a custom user
+	tooltip := "GitHub PR Monitor"
+	if app.targetUser != "" {
+		tooltip = fmt.Sprintf("GitHub PR Monitor - @%s", app.targetUser)
+	}
+	systray.SetTooltip(tooltip)
 
 	// Set up click handlers
 	systray.SetOnClick(func(menu systray.IMenu) {
@@ -199,7 +218,13 @@ func (app *App) updatePRs(ctx context.Context) {
 		if !app.lastSuccessfulFetch.IsZero() {
 			timeSinceSuccess = time.Since(app.lastSuccessfulFetch).Round(time.Minute).String()
 		}
-		systray.SetTooltip(fmt.Sprintf("GitHub PR Monitor - Error: %v\nLast success: %s ago", err, timeSinceSuccess))
+
+		// Include user in error tooltip
+		userInfo := ""
+		if app.targetUser != "" {
+			userInfo = fmt.Sprintf(" - @%s", app.targetUser)
+		}
+		systray.SetTooltip(fmt.Sprintf("GitHub PR Monitor%s - Error: %v\nLast success: %s ago", userInfo, err, timeSinceSuccess))
 		return
 	}
 
