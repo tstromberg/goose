@@ -300,7 +300,10 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		}
 		log.Printf("Hide stale PRs: %v", app.hideStaleIncoming)
 		// Force menu rebuild since hideStaleIncoming changed
-		app.lastMenuHashInt = 0
+		app.mu.Lock()
+		log.Print("[MENU] *** CLEARING menu state due to hide stale toggle ***")
+		app.lastMenuState = nil
+		app.mu.Unlock()
 		app.rebuildMenu(ctx)
 	})
 

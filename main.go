@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/energye/systray"
 	"github.com/gen2brain/beeep"
@@ -38,8 +40,9 @@ const (
 	stalePRThreshold = 90 * 24 * time.Hour
 	maxPRsToProcess  = 200 // Limit for performance
 
-	// Update intervals.
-	updateInterval = 5 * time.Minute // Reduced frequency to avoid rate limits
+	// Update interval settings.
+	minUpdateInterval     = 10 * time.Second
+	defaultUpdateInterval = 1 * time.Minute
 
 	// Retry settings for external API calls - exponential backoff with jitter up to 2 minutes.
 	maxRetryDelay = 2 * time.Minute
@@ -58,6 +61,32 @@ type PR struct {
 	NeedsReview  bool
 }
 
+// MenuState represents the current state of menu items for comparison.
+type MenuState struct {
+	IncomingItems []MenuItemState `json:"incoming"`
+	OutgoingItems []MenuItemState `json:"outgoing"`
+	HideStale     bool            `json:"hide_stale"`
+}
+
+// MenuItemState represents a single menu item's display state.
+type MenuItemState struct {
+	URL          string `json:"url"`
+	Title        string `json:"title"`
+	Repository   string `json:"repository"`
+	ActionReason string `json:"action_reason"`
+	Number       int    `json:"number"`
+	NeedsReview  bool   `json:"needs_review"`
+	IsBlocked    bool   `json:"is_blocked"`
+}
+
+// TurnResult represents a Turn API result to be applied later.
+type TurnResult struct {
+	URL          string
+	ActionReason string
+	NeedsReview  bool
+	IsOwner      bool
+}
+
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
@@ -65,30 +94,41 @@ type App struct {
 	currentUser         *github.User
 	previousBlockedPRs  map[string]bool
 	client              *github.Client
+	lastMenuState       *MenuState
 	targetUser          string
 	cacheDir            string
-	outgoing            []PR
 	incoming            []PR
-	lastMenuHashInt     uint64
+	outgoing            []PR
+	pendingTurnResults  []TurnResult
 	consecutiveFailures int
+	updateInterval      time.Duration
 	mu                  sync.RWMutex
 	initialLoadComplete bool
 	menuInitialized     bool
 	noCache             bool
 	hideStaleIncoming   bool
+	loadingTurnData     bool
 }
 
 func main() {
 	// Parse command line flags
 	var targetUser string
 	var noCache bool
+	var updateInterval time.Duration
 	flag.StringVar(&targetUser, "user", "", "GitHub user to query PRs for (defaults to authenticated user)")
 	flag.BoolVar(&noCache, "no-cache", false, "Bypass cache for debugging")
+	flag.DurationVar(&updateInterval, "interval", defaultUpdateInterval, "Update interval (e.g. 30s, 1m, 5m)")
 	flag.Parse()
+
+	// Validate update interval
+	if updateInterval < minUpdateInterval {
+		log.Printf("Update interval %v too short, using minimum of %v", updateInterval, minUpdateInterval)
+		updateInterval = minUpdateInterval
+	}
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Starting GitHub PR Monitor (version=%s, commit=%s, date=%s)", version, commit, date)
-	log.Printf("Retry configuration: max_retries=%d, max_delay=%v", maxRetries, maxRetryDelay)
+	log.Printf("Configuration: update_interval=%v, max_retries=%d, max_delay=%v", updateInterval, maxRetries, maxRetryDelay)
 
 	ctx := context.Background()
 
@@ -108,6 +148,8 @@ func main() {
 		previousBlockedPRs: make(map[string]bool),
 		targetUser:         targetUser,
 		noCache:            noCache,
+		updateInterval:     updateInterval,
+		pendingTurnResults: make([]TurnResult, 0),
 	}
 
 	log.Println("Initializing GitHub clients...")
@@ -218,8 +260,9 @@ func (app *App) updateLoop(ctx context.Context) {
 		}
 	}()
 
-	ticker := time.NewTicker(updateInterval)
+	ticker := time.NewTicker(app.updateInterval)
 	defer ticker.Stop()
+	log.Printf("[UPDATE] Update loop started with interval: %v", app.updateInterval)
 
 	// Initial update with wait for Turn data
 	app.updatePRsWithWait(ctx)
@@ -299,6 +342,7 @@ func (app *App) updatePRs(ctx context.Context) {
 	}
 
 	// Update health status on success
+	log.Printf("[UPDATE] Successfully fetched %d incoming, %d outgoing PRs", len(incoming), len(outgoing))
 	app.mu.Lock()
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
@@ -308,8 +352,10 @@ func (app *App) updatePRs(ctx context.Context) {
 	// Use a single lock for all operations on previousBlockedPRs and initialLoadComplete
 	app.mu.Lock()
 	oldBlockedPRs := app.previousBlockedPRs
-	initialLoad := app.initialLoadComplete
+	initialLoadComplete := app.initialLoadComplete
 	app.mu.Unlock()
+
+	log.Printf("[NOTIFY] Checking for newly blocked PRs (initialLoadComplete=%v, oldBlockedCount=%d)", initialLoadComplete, len(oldBlockedPRs))
 
 	currentBlockedPRs := make(map[string]bool)
 	var incomingBlocked, outgoingBlocked int
@@ -323,12 +369,16 @@ func (app *App) updatePRs(ctx context.Context) {
 			}
 			// Send notification and play sound if PR wasn't blocked before
 			// (only after initial load to avoid startup noise)
-			if initialLoad && !oldBlockedPRs[incoming[i].URL] {
+			if initialLoadComplete && !oldBlockedPRs[incoming[i].URL] {
+				log.Printf("[NOTIFY] Sending notification for newly blocked incoming PR: %s #%d", incoming[i].Repository, incoming[i].Number)
 				if err := beeep.Notify("PR Blocked on You",
 					fmt.Sprintf("%s #%d: %s", incoming[i].Repository, incoming[i].Number, incoming[i].Title), ""); err != nil {
 					log.Printf("Failed to send notification: %v", err)
 				}
 				app.playSound(ctx, "detective")
+			} else {
+				log.Printf("[NOTIFY] Skipping notification for incoming %s: initialLoadComplete=%v, wasBlocked=%v",
+					incoming[i].Repository, initialLoadComplete, oldBlockedPRs[incoming[i].URL])
 			}
 		}
 	}
@@ -341,12 +391,16 @@ func (app *App) updatePRs(ctx context.Context) {
 			}
 			// Send notification and play sound if PR wasn't blocked before
 			// (only after initial load to avoid startup noise)
-			if initialLoad && !oldBlockedPRs[outgoing[i].URL] {
+			if initialLoadComplete && !oldBlockedPRs[outgoing[i].URL] {
+				log.Printf("[NOTIFY] Sending notification for newly blocked outgoing PR: %s #%d", outgoing[i].Repository, outgoing[i].Number)
 				if err := beeep.Notify("PR Blocked on You",
 					fmt.Sprintf("%s #%d: %s", outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title), ""); err != nil {
 					log.Printf("Failed to send notification: %v", err)
 				}
 				app.playSound(ctx, "rocket")
+			} else {
+				log.Printf("[NOTIFY] Skipping notification for outgoing %s: initialLoadComplete=%v, wasBlocked=%v",
+					outgoing[i].Repository, initialLoadComplete, oldBlockedPRs[outgoing[i].URL])
 			}
 		}
 	}
@@ -365,56 +419,113 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.updateMenuIfChanged(ctx)
 }
 
+// buildCurrentMenuState creates a MenuState representing the current menu items.
+func (app *App) buildCurrentMenuState() *MenuState {
+	// Apply the same filtering as the menu display (stale PR filtering)
+	var filteredIncoming, filteredOutgoing []PR
+
+	now := time.Now()
+	staleThreshold := now.Add(-stalePRThreshold)
+
+	for _, pr := range app.incoming {
+		if !app.hideStaleIncoming || pr.UpdatedAt.After(staleThreshold) {
+			filteredIncoming = append(filteredIncoming, pr)
+		}
+	}
+
+	for _, pr := range app.outgoing {
+		if !app.hideStaleIncoming || pr.UpdatedAt.After(staleThreshold) {
+			filteredOutgoing = append(filteredOutgoing, pr)
+		}
+	}
+
+	// Sort PRs the same way the menu does
+	incomingSorted := sortPRsBlockedFirst(filteredIncoming)
+	outgoingSorted := sortPRsBlockedFirst(filteredOutgoing)
+
+	// Build menu item states
+	incomingItems := make([]MenuItemState, len(incomingSorted))
+	for i, pr := range incomingSorted {
+		incomingItems[i] = MenuItemState{
+			URL:          pr.URL,
+			Title:        pr.Title,
+			Repository:   pr.Repository,
+			Number:       pr.Number,
+			NeedsReview:  pr.NeedsReview,
+			IsBlocked:    false, // incoming PRs don't use IsBlocked
+			ActionReason: pr.ActionReason,
+		}
+	}
+
+	outgoingItems := make([]MenuItemState, len(outgoingSorted))
+	for i, pr := range outgoingSorted {
+		outgoingItems[i] = MenuItemState{
+			URL:          pr.URL,
+			Title:        pr.Title,
+			Repository:   pr.Repository,
+			Number:       pr.Number,
+			NeedsReview:  pr.NeedsReview,
+			IsBlocked:    pr.IsBlocked,
+			ActionReason: pr.ActionReason,
+		}
+	}
+
+	return &MenuState{
+		IncomingItems: incomingItems,
+		OutgoingItems: outgoingItems,
+		HideStale:     app.hideStaleIncoming,
+	}
+}
+
 // updateMenuIfChanged only rebuilds the menu if the PR data has actually changed.
 func (app *App) updateMenuIfChanged(ctx context.Context) {
 	app.mu.RLock()
-	// Calculate hash including blocking status - use efficient integer hash
-	var incomingBlocked, outgoingBlocked int
-	for i := range app.incoming {
-		if app.incoming[i].NeedsReview {
-			incomingBlocked++
+	// Skip menu updates while Turn data is still loading to avoid excessive rebuilds
+	if app.loadingTurnData {
+		// But still save the current state for future comparisons
+		currentMenuState := app.buildCurrentMenuState()
+		if app.lastMenuState == nil {
+			log.Print("[MENU] Skipping menu update - Turn data still loading, but saving state for future comparison")
+			app.mu.RUnlock()
+			app.mu.Lock()
+			app.lastMenuState = currentMenuState
+			app.mu.Unlock()
+		} else {
+			app.mu.RUnlock()
+			log.Print("[MENU] Skipping menu update - Turn data still loading")
 		}
+		return
 	}
-	for i := range app.outgoing {
-		if app.outgoing[i].IsBlocked {
-			outgoingBlocked++
-		}
-	}
-
-	// Build hash as integers to avoid string allocation
-	const (
-		hashPartsCount  = 5
-		hideStaleIndex  = 4
-		bitsPerHashPart = 8
-	)
-	hashParts := [hashPartsCount]int{
-		len(app.incoming),
-		len(app.outgoing),
-		incomingBlocked,
-		outgoingBlocked,
-		0, // hideStaleIncoming
-	}
-	if app.hideStaleIncoming {
-		hashParts[hideStaleIndex] = 1
-	}
-
-	// Simple hash function - combine values
-	var currentHashInt uint64
-	for i, part := range hashParts {
-		// Safe conversion since we control the values
-		if part >= 0 {
-			currentHashInt ^= uint64(part) << (i * bitsPerHashPart)
-		}
+	log.Print("[MENU] *** updateMenuIfChanged called - calculating diff ***")
+	currentMenuState := app.buildCurrentMenuState()
+	lastMenuState := app.lastMenuState
+	if lastMenuState == nil {
+		log.Print("[MENU] *** lastMenuState is NIL - will do initial build ***")
+	} else {
+		log.Printf("[MENU] *** lastMenuState exists (incoming:%d, outgoing:%d) - will compare ***",
+			len(lastMenuState.IncomingItems), len(lastMenuState.OutgoingItems))
 	}
 	app.mu.RUnlock()
 
-	if currentHashInt == app.lastMenuHashInt {
-		log.Printf("[MENU] Menu hash unchanged (%d), skipping update", currentHashInt)
-		return
+	if lastMenuState != nil {
+		diff := cmp.Diff(lastMenuState, currentMenuState)
+		log.Printf("[MENU] *** DIFF CALCULATION RESULT ***:\n%s", diff)
+		if diff == "" {
+			log.Printf("[MENU] Menu state unchanged, skipping update (incoming:%d, outgoing:%d)",
+				len(currentMenuState.IncomingItems), len(currentMenuState.OutgoingItems))
+			return
+		}
+		log.Print("[MENU] *** DIFF DETECTED *** Menu state changed, rebuilding menu")
+	} else {
+		log.Printf("[MENU] Initial menu build (incoming:%d, outgoing:%d)",
+			len(currentMenuState.IncomingItems), len(currentMenuState.OutgoingItems))
 	}
 
-	log.Printf("[MENU] Menu hash changed from %d to %d, rebuilding entire menu", app.lastMenuHashInt, currentHashInt)
-	app.lastMenuHashInt = currentHashInt
+	app.mu.Lock()
+	log.Printf("[MENU] *** SAVING menu state (incoming:%d, outgoing:%d) ***",
+		len(currentMenuState.IncomingItems), len(currentMenuState.OutgoingItems))
+	app.lastMenuState = currentMenuState
+	app.mu.Unlock()
 	app.rebuildMenu(ctx)
 }
 
@@ -461,6 +572,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	}
 
 	// Update health status on success
+	log.Printf("[UPDATE] Successfully fetched %d incoming, %d outgoing PRs", len(incoming), len(outgoing))
 	app.mu.Lock()
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
@@ -470,8 +582,10 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	// Use a single lock for all operations on previousBlockedPRs and initialLoadComplete
 	app.mu.Lock()
 	oldBlockedPRs := app.previousBlockedPRs
-	initialLoad := app.initialLoadComplete
+	initialLoadComplete := app.initialLoadComplete
 	app.mu.Unlock()
+
+	log.Printf("[NOTIFY] Checking for newly blocked PRs (initialLoadComplete=%v, oldBlockedCount=%d)", initialLoadComplete, len(oldBlockedPRs))
 
 	currentBlockedPRs := make(map[string]bool)
 	var incomingBlocked, outgoingBlocked int
@@ -485,12 +599,16 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 			}
 			// Send notification and play sound if PR wasn't blocked before
 			// (only after initial load to avoid startup noise)
-			if initialLoad && !oldBlockedPRs[incoming[i].URL] {
+			if initialLoadComplete && !oldBlockedPRs[incoming[i].URL] {
+				log.Printf("[NOTIFY] Sending notification for newly blocked incoming PR: %s #%d", incoming[i].Repository, incoming[i].Number)
 				if err := beeep.Notify("PR Blocked on You",
 					fmt.Sprintf("%s #%d: %s", incoming[i].Repository, incoming[i].Number, incoming[i].Title), ""); err != nil {
 					log.Printf("Failed to send notification: %v", err)
 				}
 				app.playSound(ctx, "detective")
+			} else {
+				log.Printf("[NOTIFY] Skipping notification for incoming %s: initialLoadComplete=%v, wasBlocked=%v",
+					incoming[i].Repository, initialLoadComplete, oldBlockedPRs[incoming[i].URL])
 			}
 		}
 	}
@@ -503,12 +621,16 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 			}
 			// Send notification and play sound if PR wasn't blocked before
 			// (only after initial load to avoid startup noise)
-			if initialLoad && !oldBlockedPRs[outgoing[i].URL] {
+			if initialLoadComplete && !oldBlockedPRs[outgoing[i].URL] {
+				log.Printf("[NOTIFY] Sending notification for newly blocked outgoing PR: %s #%d", outgoing[i].Repository, outgoing[i].Number)
 				if err := beeep.Notify("PR Blocked on You",
 					fmt.Sprintf("%s #%d: %s", outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title), ""); err != nil {
 					log.Printf("Failed to send notification: %v", err)
 				}
 				app.playSound(ctx, "rocket")
+			} else {
+				log.Printf("[NOTIFY] Skipping notification for outgoing %s: initialLoadComplete=%v, wasBlocked=%v",
+					outgoing[i].Repository, initialLoadComplete, oldBlockedPRs[outgoing[i].URL])
 			}
 		}
 	}
