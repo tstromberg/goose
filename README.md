@@ -1,102 +1,45 @@
 # Ready to Review 🎯
 
-**Stop being the blocker. Get notified only when it matters.**
-
-The smartest PR tracker that knows when you're actually blocking someone - not just when you're assigned. Only alerts when tests pass and your review is truly needed.
+The smart PR tracker that knows when you're actually blocking someone. Lives in your menubar, tracks GitHub PRs, and plays sound effects when you need to pay attention.
 
 ![PR Menubar Screenshot](media/screenshot.png)
-
-📊 **Live PR counter** • 🎯 **Only notifies when YOU'RE the blocker** • ✅ **Waits for tests to pass** • ⚡ **One-click access**
-
-## The Problem We Solve 🎯
-
-- **"Did I forget to review that PR?"** - Never again. See pending reviews at a glance.
-- **"Is my PR blocking the team?"** - Instant visibility on blocked PRs with ❗ indicators.
-- **"Which PR should I review first?"** - Smart prioritization shows you what matters most.
-- **"I hate context switching to check PRs"** - Stay in your flow. Check without leaving your work.
 
 ## Quick Start ⚡
 
 ```bash
-# Install dependencies if you don't have them:
-brew install gh go  # macOS (or visit https://cli.github.com and https://go.dev)
+# Install dependencies:
+brew install gh go  # macOS (or visit https://cli.github.com)
 gh auth login
 
-# Install & run Ready to Review:
-git clone https://github.com/ready-to-review/pr-menubar.git && cd pr-menubar && make run
+# Install & run:
+git clone https://github.com/ready-to-review/pr-menubar.git
+cd pr-menubar && make run
 ```
 
-That's it! The app appears in your menubar showing your PR count. Click to see all PRs with smart prioritization.
+The app appears in your menubar showing: `incoming / outgoing` PRs
 
-**Perfect for:**
-- ✅ Teams doing 10+ PRs/week
-- ✅ Open-source contributors
-- ✅ Remote/async teams across timezones
-- ✅ Anyone who's ever felt guilty about blocking a PR
+## Features
 
-## Why Not Just GitHub Notifications? 🤔
-
-GitHub notifications are noisy and overwhelming. Ready to Review is different:
-
-- **Actually Smart**: Only notifies when YOU are the specific blocker - not just because you're assigned
-- **Test-Aware**: Waits for tests to pass before alerting you - no more reviewing broken PRs
-- **Context-Aware**: Knows when someone explicitly asked for your help vs. automatic assignment
+- **Smart Notifications**: Only alerts when YOU are the blocker (not just assigned)
+- **Sound Effects**: Audio cues for important PR events 🔊
+- **Test-Aware**: Waits for CI to pass before notifying
 - **Zero Noise**: No pings for PRs that aren't actually blocked on you
+- **One-Click Access**: Open any PR instantly from the menubar
 
-## How It Works ✨
+## Installation
 
-Ready to Review displays a simple counter in your menubar: `incoming / outgoing`
-
-- **Incoming** 📥: PRs from teammates waiting for your review
-- **Outgoing** 📤: Your PRs waiting on others
-
-Blocked PRs are marked with ❗. Click any PR to open it in your browser.
-
-### Auto-Start (macOS) 🌟
-
-Click the menubar icon and toggle "Start at Login". Never think about it again!
-
-## Authentication & Privacy 🔐
-
-Ready to Review uses your GitHub CLI token (`gh auth token`) to:
-- Fetch your PRs from GitHub
-- Authenticate with our API server which intelligently determines when you're actually blocking a PR
-
-**Your token never gets stored on our servers** - we use it to make GitHub API requests, then forget about it.
-
-## Installation Options
-
-**Quick Install** (recommended):
 ```bash
-make run  # On macOS: installs to /Applications and launches
+make run          # Quick install (macOS: installs to /Applications)
+make install      # Traditional install for your OS
+make build        # Build only
 ```
 
-**Traditional Install**:
-```bash
-make install  # Installs to the right place for your OS:
-             # macOS: /Applications/Ready to Review.app
-             # Linux/BSD: /usr/local/bin/ready-to-review
-             # Windows: %LOCALAPPDATA%\Programs\ready-to-review
-```
+**Requirements**: GitHub CLI (`gh`) authenticated, Go 1.21+ (for building)
 
-**Build Only**:
-```bash
-make build        # Build for current platform
-make app-bundle   # macOS: create .app bundle
-```
+## Privacy
 
-**Requirements**:
-- GitHub CLI (`gh`) installed and authenticated
-- Go 1.21+ (for building from source)
-
-## Contributing 🤝
-
-Open-source contributions are welcome! Got an idea? Send a PR and we'll ship it. It's that simple.
+Your GitHub token (from `gh auth token`) is used to fetch PRs and authenticate with our API. We never store it.
 
 ---
 
-### 🌟 Make Your Team Happier Today
-
-No more blocked PRs. No more forgotten reviews. Just smooth, efficient collaboration.
-
-Built with ❤️ by [CodeGroove](https://codegroove.dev/products/) for teams who ship fast.
+Built with ❤️ by [CodeGroove](https://codegroove.dev/products/) • [Contribute](https://github.com/ready-to-review/pr-menubar)
