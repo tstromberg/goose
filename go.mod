@@ -3,6 +3,7 @@ module ready-to-review
 go 1.23.4
 
 require (
+	github.com/codeGROOVE-dev/retry v1.2.0
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
 	github.com/google/go-github/v57 v57.0.0

@@ -29,14 +29,18 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	hash := sha256.Sum256([]byte(key))
 	cacheFile := filepath.Join(app.cacheDir, hex.EncodeToString(hash[:])[:16]+".json")
 
-	// Try to read from cache
-	if data, err := os.ReadFile(cacheFile); err == nil {
+	// Try to read from cache (gracefully handle all cache errors)
+	if data, readErr := os.ReadFile(cacheFile); readErr == nil {
 		var entry cacheEntry
-		if err := json.Unmarshal(data, &entry); err == nil {
-			// Check if cache is still valid (2 hour TTL)
-			if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
-				return entry.Data, nil
+		if unmarshalErr := json.Unmarshal(data, &entry); unmarshalErr != nil {
+			log.Printf("Failed to unmarshal cache data for %s: %v", url, unmarshalErr)
+			// Remove corrupted cache file
+			if removeErr := os.Remove(cacheFile); removeErr != nil {
+				log.Printf("Failed to remove corrupted cache file: %v", removeErr)
 			}
+		} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
+			// Check if cache is still valid (2 hour TTL)
+			return entry.Data, nil
 		}
 	}
 
@@ -53,16 +57,20 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		return nil, err
 	}
 
-	// Save to cache
+	// Save to cache (don't fail if caching fails)
 	entry := cacheEntry{
 		Data:      data,
 		CachedAt:  time.Now(),
 		UpdatedAt: updatedAt,
 	}
-	cacheData, err := json.Marshal(entry)
-	if err == nil {
-		if err := os.WriteFile(cacheFile, cacheData, 0o600); err != nil {
-			log.Printf("Failed to write cache for %s: %v", url, err)
+	if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
+		log.Printf("Failed to marshal cache data for %s: %v", url, marshalErr)
+	} else {
+		// Ensure cache directory exists
+		if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
+			log.Printf("Failed to create cache directory: %v", dirErr)
+		} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
+			log.Printf("Failed to write cache file for %s: %v", url, writeErr)
 		}
 	}
 
@@ -73,9 +81,11 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 func (app *App) cleanupOldCache() {
 	entries, err := os.ReadDir(app.cacheDir)
 	if err != nil {
+		log.Printf("Failed to read cache directory for cleanup: %v", err)
 		return
 	}
 
+	var cleanupCount, errorCount int
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -83,14 +93,24 @@ func (app *App) cleanupOldCache() {
 
 		info, err := entry.Info()
 		if err != nil {
+			log.Printf("Failed to get file info for cache entry %s: %v", entry.Name(), err)
+			errorCount++
 			continue
 		}
 
 		// Remove cache files older than 5 days
 		if time.Since(info.ModTime()) > cacheCleanupInterval {
-			if err := os.Remove(filepath.Join(app.cacheDir, entry.Name())); err != nil {
-				log.Printf("Failed to remove old cache: %v", err)
+			filePath := filepath.Join(app.cacheDir, entry.Name())
+			if removeErr := os.Remove(filePath); removeErr != nil {
+				log.Printf("Failed to remove old cache file %s: %v", filePath, removeErr)
+				errorCount++
+			} else {
+				cleanupCount++
 			}
 		}
+	}
+
+	if cleanupCount > 0 || errorCount > 0 {
+		log.Printf("Cache cleanup completed: %d files removed, %d errors", cleanupCount, errorCount)
 	}
 }

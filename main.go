@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,20 +55,25 @@ type PR struct {
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
+	prMenuItems         map[string]*systray.MenuItem
 	turnClient          *turn.Client
 	currentUser         *github.User
-	targetUser          string // User to query PRs for (overrides currentUser if set)
 	previousBlockedPRs  map[string]bool
 	client              *github.Client
+	sectionHeaders      map[string]*systray.MenuItem
+	targetUser          string
 	cacheDir            string
-	lastMenuHash        string
 	incoming            []PR
-	menuItems           []*systray.MenuItem
 	outgoing            []PR
+	menuItems           []*systray.MenuItem
+	lastMenuHashInt     uint64
 	consecutiveFailures int
 	mu                  sync.RWMutex
 	hideStaleIncoming   bool
 	initialLoadComplete bool
+	turnDataLoading     bool
+	turnDataLoaded      bool
+	menuInitialized     bool
 }
 
 func main() {
@@ -96,6 +102,8 @@ func main() {
 		hideStaleIncoming:  true,
 		previousBlockedPRs: make(map[string]bool),
 		targetUser:         targetUser,
+		prMenuItems:        make(map[string]*systray.MenuItem),
+		sectionHeaders:     make(map[string]*systray.MenuItem),
 	}
 
 	log.Println("Initializing GitHub clients...")
@@ -160,7 +168,7 @@ func (app *App) onReady(ctx context.Context) {
 
 	// Create initial menu
 	log.Println("Creating initial menu")
-	app.updateMenu(ctx)
+	app.initializeMenu(ctx)
 
 	// Clean old cache on startup
 	app.cleanupOldCache()
@@ -174,8 +182,20 @@ func (app *App) updateLoop(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("PANIC in update loop: %v", r)
-			// Restart the update loop after a delay
-			time.Sleep(10 * time.Second)
+
+			// Set error state in UI
+			systray.SetTitle("💥")
+			systray.SetTooltip("GitHub PR Monitor - Critical error, restarting...")
+
+			// Update failure count
+			app.mu.Lock()
+			app.consecutiveFailures += 5 // Treat panic as multiple failures
+			app.mu.Unlock()
+
+			// Restart the update loop after a delay (with exponential backoff)
+			const panicRestartDelay = 30 * time.Second
+			log.Printf("Restarting update loop in %v", panicRestartDelay)
+			time.Sleep(panicRestartDelay)
 			go app.updateLoop(ctx)
 		}
 	}()
@@ -204,27 +224,59 @@ func (app *App) updatePRs(ctx context.Context) {
 		log.Printf("Error fetching PRs: %v", err)
 		app.mu.Lock()
 		app.consecutiveFailures++
+		failureCount := app.consecutiveFailures
 		app.mu.Unlock()
 
-		// Show different icon based on failure count
-		if app.consecutiveFailures > 3 {
-			systray.SetTitle("❌") // Complete failure
-		} else {
-			systray.SetTitle("⚠️") // Warning
+		// Progressive degradation based on failure count
+		const (
+			minorFailureThreshold = 3
+			majorFailureThreshold = 10
+		)
+		var title, tooltip string
+		switch {
+		case failureCount == 1:
+			title = "⚠️"
+			tooltip = "GitHub PR Monitor - Temporary error, retrying..."
+		case failureCount <= minorFailureThreshold:
+			title = "⚠️"
+			tooltip = fmt.Sprintf("GitHub PR Monitor - %d consecutive failures", failureCount)
+		case failureCount <= majorFailureThreshold:
+			title = "❌"
+			tooltip = "GitHub PR Monitor - Multiple failures, check connection"
+		default:
+			title = "💀"
+			tooltip = "GitHub PR Monitor - Service degraded, check authentication"
 		}
 
-		// Include time since last success in tooltip
+		systray.SetTitle(title)
+
+		// Include time since last success and user info
 		timeSinceSuccess := "never"
 		if !app.lastSuccessfulFetch.IsZero() {
 			timeSinceSuccess = time.Since(app.lastSuccessfulFetch).Round(time.Minute).String()
 		}
 
-		// Include user in error tooltip
 		userInfo := ""
 		if app.targetUser != "" {
 			userInfo = fmt.Sprintf(" - @%s", app.targetUser)
 		}
-		systray.SetTooltip(fmt.Sprintf("GitHub PR Monitor%s - Error: %v\nLast success: %s ago", userInfo, err, timeSinceSuccess))
+
+		// Provide actionable error message based on error type
+		var errorHint string
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "rate limited"):
+			errorHint = "\nRate limited - wait before retrying"
+		case strings.Contains(errMsg, "authentication"):
+			errorHint = "\nCheck GitHub token with 'gh auth status'"
+		case strings.Contains(errMsg, "network"):
+			errorHint = "\nCheck internet connection"
+		default:
+			// No specific hint for this error type
+		}
+
+		fullTooltip := fmt.Sprintf("%s%s\nLast success: %s ago%s", tooltip, userInfo, timeSinceSuccess, errorHint)
+		systray.SetTooltip(fullTooltip)
 		return
 	}
 
@@ -286,18 +338,6 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.outgoing = outgoing
 	app.mu.Unlock()
 
-	// Set title based on PR state
-	switch {
-	case incomingBlocked == 0 && outgoingBlocked == 0:
-		systray.SetTitle("😊")
-	case incomingBlocked > 0 && outgoingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("🕵️ %d / 🚀 %d", incomingBlocked, outgoingBlocked))
-	case incomingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("🕵️ %d", incomingBlocked))
-	default:
-		systray.SetTitle(fmt.Sprintf("🚀 %d", outgoingBlocked))
-	}
-
 	app.updateMenuIfChanged(ctx)
 
 	// Mark initial load as complete after first successful update
@@ -310,20 +350,63 @@ func (app *App) updatePRs(ctx context.Context) {
 
 // isStale returns true if the PR hasn't been updated in over 90 days.
 func isStale(updatedAt time.Time) bool {
-	return time.Since(updatedAt) > stalePRThreshold
+	return updatedAt.Before(time.Now().Add(-stalePRThreshold))
 }
 
 // updateMenuIfChanged only rebuilds the menu if the PR data has actually changed.
 func (app *App) updateMenuIfChanged(ctx context.Context) {
 	app.mu.RLock()
-	// Simple hash: just count of PRs and hideStale setting
-	currentHash := fmt.Sprintf("%d-%d-%t", len(app.incoming), len(app.outgoing), app.hideStaleIncoming)
+	// Calculate hash including blocking status - use efficient integer hash
+	var incomingBlocked, outgoingBlocked int
+	for i := range app.incoming {
+		if app.incoming[i].NeedsReview {
+			incomingBlocked++
+		}
+	}
+	for i := range app.outgoing {
+		if app.outgoing[i].IsBlocked {
+			outgoingBlocked++
+		}
+	}
+
+	// Build hash as integers to avoid string allocation
+	const (
+		hashPartsCount   = 6
+		hideStaleIndex   = 4
+		turnLoadingIndex = 5
+		bitsPerHashPart  = 8
+	)
+	hashParts := [hashPartsCount]int{
+		len(app.incoming),
+		len(app.outgoing),
+		incomingBlocked,
+		outgoingBlocked,
+		0, // hideStaleIncoming
+		0, // turnDataLoading
+	}
+	if app.hideStaleIncoming {
+		hashParts[hideStaleIndex] = 1
+	}
+	if app.turnDataLoading {
+		hashParts[turnLoadingIndex] = 1
+	}
+
+	// Simple hash function - combine values
+	var currentHashInt uint64
+	for i, part := range hashParts {
+		// Safe conversion since we control the values
+		if part >= 0 {
+			currentHashInt ^= uint64(part) << (i * bitsPerHashPart)
+		}
+	}
 	app.mu.RUnlock()
 
-	if currentHash == app.lastMenuHash {
+	if currentHashInt == app.lastMenuHashInt {
+		log.Printf("[MENU] Menu hash unchanged (%d), skipping update", currentHashInt)
 		return
 	}
 
-	app.lastMenuHash = currentHash
+	log.Printf("[MENU] Menu hash changed from %d to %d, updating menu", app.lastMenuHashInt, currentHashInt)
+	app.lastMenuHashInt = currentHashInt
 	app.updateMenu(ctx)
 }
