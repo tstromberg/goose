@@ -157,11 +157,11 @@ func (app *App) setTrayTitle() {
 	case incomingBlocked == 0 && outgoingBlocked == 0:
 		systray.SetTitle("😊")
 	case incomingBlocked > 0 && outgoingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("🕵️ %d / 🚀 %d", incomingBlocked, outgoingBlocked))
+		systray.SetTitle(fmt.Sprintf("👀 %d 🎉 %d", incomingBlocked, outgoingBlocked))
 	case incomingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("🕵️ %d", incomingBlocked))
+		systray.SetTitle(fmt.Sprintf("👀 %d", incomingBlocked))
 	default:
-		systray.SetTitle(fmt.Sprintf("🚀 %d", outgoingBlocked))
+		systray.SetTitle(fmt.Sprintf("🎉 %d", outgoingBlocked))
 	}
 }
 
