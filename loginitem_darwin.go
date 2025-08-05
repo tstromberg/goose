@@ -16,14 +16,22 @@ import (
 	"github.com/energye/systray"
 )
 
-// escapeAppleScriptString safely escapes a string for use in AppleScript.
-// This prevents injection attacks by escaping quotes and backslashes.
-func escapeAppleScriptString(s string) string {
-	// Escape backslashes first
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	// Then escape quotes
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return s
+// validateAndEscapePathForAppleScript validates and escapes a path for safe use in AppleScript.
+// Returns empty string if path contains invalid characters.
+func validateAndEscapePathForAppleScript(path string) string {
+	// Validate path contains only safe characters
+	for _, r := range path {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+			(r < '0' || r > '9') && r != ' ' && r != '.' &&
+			r != '/' && r != '-' && r != '_' {
+			log.Printf("Path contains invalid character for AppleScript: %q in path %s", r, path)
+			return ""
+		}
+	}
+	// Escape backslashes first then quotes
+	path = strings.ReplaceAll(path, `\`, `\\`)
+	path = strings.ReplaceAll(path, `"`, `\"`)
+	return path
 }
 
 // isLoginItem checks if the app is set to start at login.
@@ -35,8 +43,12 @@ func isLoginItem(ctx context.Context) bool {
 	}
 
 	// Use osascript to check login items
-	escapedPath := escapeAppleScriptString(appPath)
-	// We use %s here because the string is already escaped by escapeAppleScriptString
+	escapedPath := validateAndEscapePathForAppleScript(appPath)
+	if escapedPath == "" {
+		log.Printf("Invalid app path for AppleScript: %s", appPath)
+		return false
+	}
+	// We use %s here because the string is already validated and escaped
 	//nolint:gocritic // already escaped
 	script := fmt.Sprintf(
 		`tell application "System Events" to get the name of every login item where path is "%s"`,
@@ -62,8 +74,11 @@ func setLoginItem(ctx context.Context, enable bool) error {
 
 	if enable {
 		// Add to login items
-		escapedPath := escapeAppleScriptString(appPath)
-		// We use %s here because the string is already escaped by escapeAppleScriptString
+		escapedPath := validateAndEscapePathForAppleScript(appPath)
+		if escapedPath == "" {
+			return fmt.Errorf("invalid app path for AppleScript: %s", appPath)
+		}
+		// We use %s here because the string is already validated and escaped
 		//nolint:gocritic // already escaped
 		script := fmt.Sprintf(
 			`tell application "System Events" to make login item at end with properties {path:"%s", hidden:false}`,
@@ -78,8 +93,11 @@ func setLoginItem(ctx context.Context, enable bool) error {
 		// Remove from login items
 		appName := filepath.Base(appPath)
 		appName = strings.TrimSuffix(appName, ".app")
-		escapedName := escapeAppleScriptString(appName)
-		// We use %s here because the string is already escaped by escapeAppleScriptString
+		escapedName := validateAndEscapePathForAppleScript(appName)
+		if escapedName == "" {
+			return fmt.Errorf("invalid app name for AppleScript: %s", appName)
+		}
+		// We use %s here because the string is already validated and escaped
 		script := fmt.Sprintf(`tell application "System Events" to delete login item "%s"`, escapedName) //nolint:gocritic // already escaped
 		log.Printf("Executing command: osascript -e %q", script)
 		cmd := exec.CommandContext(ctx, "osascript", "-e", script)
@@ -142,7 +160,7 @@ func getAppPath() (string, error) {
 }
 
 // addLoginItemUI adds the login item menu option (macOS only).
-func addLoginItemUI(ctx context.Context, app *App) {
+func addLoginItemUI(ctx context.Context, _ *App) {
 	// Only show login item menu if running from an app bundle
 	if !isRunningFromAppBundle() {
 		log.Println("Hiding 'Start at Login' menu item - not running from app bundle")
@@ -150,7 +168,6 @@ func addLoginItemUI(ctx context.Context, app *App) {
 	}
 
 	loginItem := systray.AddMenuItem("Start at Login", "Automatically start when you log in")
-	app.menuItems = append(app.menuItems, loginItem)
 
 	// Set initial state
 	if isLoginItem(ctx) {

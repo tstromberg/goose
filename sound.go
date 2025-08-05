@@ -56,14 +56,21 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 	// Ensure sounds are cached
 	app.initSoundCache()
 
-	// Select the sound file
-	var soundName string
-	switch soundType {
-	case "rocket":
-		soundName = "launch.wav"
-	case "detective":
-		soundName = "impact.wav"
-	default:
+	// Select the sound file with validation to prevent path traversal
+	allowedSounds := map[string]string{
+		"rocket":    "launch.wav",
+		"detective": "impact.wav",
+	}
+
+	soundName, ok := allowedSounds[soundType]
+	if !ok {
+		log.Printf("Invalid sound type requested: %s", soundType)
+		return
+	}
+
+	// Double-check the sound name contains no path separators
+	if strings.Contains(soundName, "/") || strings.Contains(soundName, "\\") || strings.Contains(soundName, "..") {
+		log.Printf("Sound name contains invalid characters: %s", soundName)
 		return
 	}
 
