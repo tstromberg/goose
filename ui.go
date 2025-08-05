@@ -2,6 +2,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -12,98 +14,173 @@ import (
 	"github.com/energye/systray"
 )
 
-// formatAge formats a duration in human-readable form
+// formatAge formats a duration in human-readable form.
 func formatAge(updatedAt time.Time) string {
 	duration := time.Since(updatedAt)
 
-	if duration < time.Minute {
-		seconds := int(duration.Seconds())
-		if seconds == 1 {
-			return "1 second"
-		}
-		return fmt.Sprintf("%d seconds", seconds)
-	} else if duration < time.Hour {
-		minutes := int(duration.Minutes())
-		if minutes == 1 {
-			return "1 minute"
-		}
-		return fmt.Sprintf("%d minutes", minutes)
-	} else if duration < 24*time.Hour {
-		hours := int(duration.Hours())
-		if hours == 1 {
-			return "1 hour"
-		}
-		return fmt.Sprintf("%d hours", hours)
-	} else if duration < 30*24*time.Hour {
-		days := int(duration.Hours() / 24)
-		if days == 1 {
-			return "1 day"
-		}
-		return fmt.Sprintf("%d days", days)
-	} else if duration < 365*24*time.Hour {
-		months := int(duration.Hours() / (24 * 30))
-		if months == 1 {
-			return "1 month"
-		}
-		return fmt.Sprintf("%d months", months)
-	} else {
-		// For PRs older than a year, show the year
+	switch {
+	case duration < time.Hour:
+		return fmt.Sprintf("%dm", int(duration.Minutes()))
+	case duration < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(duration.Hours()))
+	case duration < 30*24*time.Hour:
+		return fmt.Sprintf("%dd", int(duration.Hours()/24))
+	case duration < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo", int(duration.Hours()/(24*30)))
+	default:
 		return updatedAt.Format("2006")
 	}
 }
 
-// openURL safely opens a URL in the default browser after validation
-func openURL(rawURL string) error {
+// openURL safely opens a URL in the default browser after validation.
+func openURL(ctx context.Context, rawURL string) error {
 	// Parse and validate the URL
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("parse url: %w", err)
 	}
 
-	// Only allow https URLs for security
+	// Security validation: scheme, host whitelist, no userinfo
 	if u.Scheme != "https" {
 		return fmt.Errorf("invalid url scheme: %s (only https allowed)", u.Scheme)
 	}
 
-	// Whitelist of allowed hosts
 	allowedHosts := map[string]bool{
 		"github.com":               true,
 		"www.github.com":           true,
 		"dash.ready-to-review.dev": true,
 	}
-
 	if !allowedHosts[u.Host] {
 		return fmt.Errorf("invalid host: %s", u.Host)
 	}
 
+	if u.User != nil {
+		return errors.New("URLs with user info are not allowed")
+	}
+
 	// Execute the open command based on OS
+	// Use safer methods that don't invoke shell interpretation
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", rawURL)
+		// Use open command with explicit arguments to prevent injection
+		log.Printf("Executing command: /usr/bin/open -u %q", rawURL)
+		cmd = exec.CommandContext(ctx, "/usr/bin/open", "-u", rawURL)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", rawURL)
+		// Use rundll32 to open URL safely without cmd shell
+		log.Printf("Executing command: rundll32.exe url.dll,FileProtocolHandler %q", rawURL)
+		cmd = exec.CommandContext(ctx, "rundll32.exe", "url.dll,FileProtocolHandler", rawURL)
 	case "linux":
-		cmd = exec.Command("xdg-open", rawURL)
+		// Use xdg-open with full path
+		log.Printf("Executing command: /usr/bin/xdg-open %q", rawURL)
+		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
 	default:
 		// Try xdg-open for other Unix-like systems
-		cmd = exec.Command("xdg-open", rawURL)
+		log.Printf("Executing command: /usr/bin/xdg-open %q", rawURL)
+		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
 	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open url: %w", err)
 	}
 
-	// Don't wait for the command to finish
+	// Don't wait for the command to finish, but add timeout to prevent goroutine leak
 	go func() {
-		cmd.Wait() // Prevent zombie processes
+		// Kill the process after 30 seconds if it hasn't finished
+		timer := time.AfterFunc(30*time.Second, func() {
+			if cmd.Process != nil {
+				if err := cmd.Process.Kill(); err != nil {
+					log.Printf("Failed to kill process: %v", err)
+				}
+			}
+		})
+		defer timer.Stop()
+
+		if err := cmd.Wait(); err != nil {
+			log.Printf("Failed to wait for command: %v", err)
+		}
 	}()
 
 	return nil
 }
 
-// updateMenu rebuilds the system tray menu
-func (app *App) updateMenu() {
+// countPRs counts the number of PRs that need review/are blocked.
+// Returns: incomingCount, incomingBlocked, outgoingCount, outgoingBlocked
+//
+//nolint:revive,gocritic // 4 return values is clearer than a struct here
+func (app *App) countPRs() (int, int, int, int) {
+	app.mu.RLock()
+	defer app.mu.RUnlock()
+
+	var incomingCount, incomingBlocked, outgoingCount, outgoingBlocked int
+
+	for i := range app.incoming {
+		if !app.hideStaleIncoming || !isStale(app.incoming[i].UpdatedAt) {
+			incomingCount++
+			if app.incoming[i].NeedsReview {
+				incomingBlocked++
+			}
+		}
+	}
+
+	for i := range app.outgoing {
+		if !app.hideStaleIncoming || !isStale(app.outgoing[i].UpdatedAt) {
+			outgoingCount++
+			if app.outgoing[i].IsBlocked {
+				outgoingBlocked++
+			}
+		}
+	}
+	return incomingCount, incomingBlocked, outgoingCount, outgoingBlocked
+}
+
+// addPRMenuItem adds a menu item for a pull request.
+func (app *App) addPRMenuItem(ctx context.Context, pr PR, isOutgoing bool) {
+	title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
+	if (!isOutgoing && pr.NeedsReview) || (isOutgoing && pr.IsBlocked) {
+		if isOutgoing {
+			title = fmt.Sprintf("%s 🚀", title)
+		} else {
+			title = fmt.Sprintf("%s 🔴", title)
+		}
+	}
+	tooltip := fmt.Sprintf("%s (%s)", pr.Title, formatAge(pr.UpdatedAt))
+	item := systray.AddMenuItem(title, tooltip)
+	app.menuItems = append(app.menuItems, item)
+
+	// Capture URL and context properly to avoid loop variable capture bug
+	item.Click(func(capturedCtx context.Context, url string) func() {
+		return func() {
+			if err := openURL(capturedCtx, url); err != nil {
+				log.Printf("failed to open url: %v", err)
+			}
+		}
+	}(ctx, pr.URL))
+}
+
+// addPRSection adds a section of PRs to the menu.
+func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string, blockedCount int, isOutgoing bool) {
+	if len(prs) == 0 {
+		return
+	}
+
+	// Add header
+	header := systray.AddMenuItem(fmt.Sprintf("%s — %d blocked on you", sectionTitle, blockedCount), "")
+	header.Disable()
+	app.menuItems = append(app.menuItems, header)
+
+	// Add PR items (already protected by mutex in caller)
+	for i := range prs {
+		// Apply filters
+		if app.hideStaleIncoming && isStale(prs[i].UpdatedAt) {
+			continue
+		}
+		app.addPRMenuItem(ctx, prs[i], isOutgoing)
+	}
+}
+
+// updateMenu rebuilds the system tray menu.
+func (app *App) updateMenu(ctx context.Context) {
 	app.mu.RLock()
 	incomingLen := len(app.incoming)
 	outgoingLen := len(app.outgoing)
@@ -116,30 +193,7 @@ func (app *App) updateMenu() {
 	app.menuItems = nil
 
 	// Calculate counts first
-	incomingBlocked := 0
-	incomingCount := 0
-
-	app.mu.RLock()
-	for _, pr := range app.incoming {
-		if !app.hideStaleIncoming || !isStale(pr.UpdatedAt) {
-			incomingCount++
-			if pr.NeedsReview {
-				incomingBlocked++
-			}
-		}
-	}
-
-	outgoingBlocked := 0
-	outgoingCount := 0
-	for _, pr := range app.outgoing {
-		if !app.hideStaleIncoming || !isStale(pr.UpdatedAt) {
-			outgoingCount++
-			if pr.IsBlocked {
-				outgoingBlocked++
-			}
-		}
-	}
-	app.mu.RUnlock()
+	incomingCount, incomingBlocked, outgoingCount, outgoingBlocked := app.countPRs()
 
 	// Show "No pull requests" if both lists are empty
 	if incomingLen == 0 && outgoingLen == 0 {
@@ -149,85 +203,30 @@ func (app *App) updateMenu() {
 		systray.AddSeparator()
 	}
 
-	// Incoming section - clean header
+	// Incoming section
 	if incomingCount > 0 {
-		incomingHeader := systray.AddMenuItem(fmt.Sprintf("Incoming — %d blocked on you", incomingBlocked), "")
-		incomingHeader.Disable()
-		app.menuItems = append(app.menuItems, incomingHeader)
-	}
-
-	if incomingCount > 0 {
-		app.mu.RLock()
-		prs := make([]PR, len(app.incoming))
-		copy(prs, app.incoming)
-		app.mu.RUnlock()
-
-		for _, pr := range prs {
-			// Apply filters
-			if app.hideStaleIncoming && isStale(pr.UpdatedAt) {
-				continue
-			}
-			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
-			if pr.Size != "" {
-				title = fmt.Sprintf("%s – %s", title, pr.Size)
-			}
-			if pr.NeedsReview {
-				title = fmt.Sprintf("%s 🔴", title)
-			}
-			tooltip := fmt.Sprintf("%s by %s (%s)", pr.Title, pr.User.GetLogin(), formatAge(pr.UpdatedAt))
-			item := systray.AddMenuItem(title, tooltip)
-			app.menuItems = append(app.menuItems, item)
-
-			// Capture URL properly to avoid loop variable capture bug
-			item.Click(func(url string) func() {
-				return func() {
-					if err := openURL(url); err != nil {
-						log.Printf("failed to open url: %v", err)
-					}
-				}
-			}(pr.URL))
-		}
+		app.addPRSection(ctx, app.incoming, "Incoming", incomingBlocked, false)
 	}
 
 	systray.AddSeparator()
 
-	// Outgoing section - clean header
+	// Outgoing section
 	if outgoingCount > 0 {
-		outgoingHeader := systray.AddMenuItem(fmt.Sprintf("Outgoing — %d blocked on you", outgoingBlocked), "")
-		outgoingHeader.Disable()
-		app.menuItems = append(app.menuItems, outgoingHeader)
+		app.addPRSection(ctx, app.outgoing, "Outgoing", outgoingBlocked, true)
 	}
 
-	if outgoingCount > 0 {
-		app.mu.RLock()
-		prs := make([]PR, len(app.outgoing))
-		copy(prs, app.outgoing)
-		app.mu.RUnlock()
+	// Add static menu items
+	app.addStaticMenuItems(ctx)
 
-		for _, pr := range prs {
-			// Apply stale filter to outgoing PRs
-			if app.hideStaleIncoming && isStale(pr.UpdatedAt) {
-				continue
-			}
-			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
-			if pr.IsBlocked {
-				title = fmt.Sprintf("%s 🚀", title)
-			}
-			tooltip := fmt.Sprintf("%s by %s (%s)", pr.Title, pr.User.GetLogin(), formatAge(pr.UpdatedAt))
-			item := systray.AddMenuItem(title, tooltip)
-			app.menuItems = append(app.menuItems, item)
-
-			// Capture URL properly to avoid loop variable capture bug
-			item.Click(func(url string) func() {
-				return func() {
-					if err := openURL(url); err != nil {
-						log.Printf("failed to open url: %v", err)
-					}
-				}
-			}(pr.URL))
-		}
+	// Now hide old menu items after new ones are created
+	// This prevents the flicker by ensuring new items exist before old ones disappear
+	for _, item := range oldMenuItems {
+		item.Hide()
 	}
+}
 
+// addStaticMenuItems adds the static menu items (hide stale, dashboard, about, quit).
+func (app *App) addStaticMenuItems(ctx context.Context) {
 	systray.AddSeparator()
 
 	// Hide stale PRs
@@ -246,7 +245,7 @@ func (app *App) updateMenu() {
 		log.Printf("Hide stale PRs: %v", app.hideStaleIncoming)
 		// Force menu rebuild since hideStaleIncoming changed
 		app.lastMenuHash = ""
-		app.updateMenu()
+		app.updateMenu(ctx)
 	})
 
 	systray.AddSeparator()
@@ -255,7 +254,7 @@ func (app *App) updateMenu() {
 	dashboardItem := systray.AddMenuItem("Dashboard", "")
 	app.menuItems = append(app.menuItems, dashboardItem)
 	dashboardItem.Click(func() {
-		if err := openURL("https://dash.ready-to-review.dev/"); err != nil {
+		if err := openURL(ctx, "https://dash.ready-to-review.dev/"); err != nil {
 			log.Printf("failed to open dashboard: %v", err)
 		}
 	})
@@ -265,7 +264,7 @@ func (app *App) updateMenu() {
 	app.menuItems = append(app.menuItems, aboutItem)
 	aboutItem.Click(func() {
 		log.Println("GitHub PR Monitor - A system tray app for tracking PR reviews")
-		if err := openURL("https://github.com/ready-to-review/pr-menubar"); err != nil {
+		if err := openURL(ctx, "https://github.com/ready-to-review/pr-menubar"); err != nil {
 			log.Printf("failed to open about page: %v", err)
 		}
 	})
@@ -273,7 +272,7 @@ func (app *App) updateMenu() {
 	systray.AddSeparator()
 
 	// Add login item option (macOS only)
-	addLoginItemUI(app)
+	addLoginItemUI(ctx, app)
 
 	// Quit
 	quitItem := systray.AddMenuItem("Quit", "")
@@ -282,10 +281,4 @@ func (app *App) updateMenu() {
 		log.Println("Quit requested by user")
 		systray.Quit()
 	})
-
-	// Now hide old menu items after new ones are created
-	// This prevents the flicker by ensuring new items exist before old ones disappear
-	for _, item := range oldMenuItems {
-		item.Hide()
-	}
 }
