@@ -119,7 +119,11 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 
 // fetchPRs retrieves all PRs involving the current user.
 func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err error) {
+	// Use targetUser if specified, otherwise use authenticated user
 	user := app.currentUser.GetLogin()
+	if app.targetUser != "" {
+		user = app.targetUser
+	}
 
 	// Single query to get all PRs involving the user
 	query := fmt.Sprintf("is:open is:pr involves:%s archived:false", user)
@@ -183,6 +187,7 @@ func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err
 		}
 
 		// Categorize as incoming or outgoing
+		// When viewing another user's PRs, we're looking at it from their perspective
 		if issue.GetUser().GetLogin() == user {
 			pr.IsBlocked = pr.NeedsReview
 			outgoing = append(outgoing, pr)
