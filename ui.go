@@ -139,9 +139,9 @@ func (app *App) addPRMenuItem(ctx context.Context, pr PR, isOutgoing bool) {
 	title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
 	if (!isOutgoing && pr.NeedsReview) || (isOutgoing && pr.IsBlocked) {
 		if isOutgoing {
-			title = fmt.Sprintf("%s 🚀", title)
+			title = fmt.Sprintf("🚀 %s", title)
 		} else {
-			title = fmt.Sprintf("%s 🔴", title)
+			title = fmt.Sprintf("🕵️ %s", title)
 		}
 	}
 	tooltip := fmt.Sprintf("%s (%s)", pr.Title, formatAge(pr.UpdatedAt))
