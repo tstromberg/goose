@@ -97,7 +97,7 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 	}
 
 	if ghPath == "" {
-		return "", errors.New("gh cli not found in trusted locations, please install from https://cli.github.com")
+		return "", errors.New("gh cli not found in trusted locations")
 	}
 
 	log.Printf("Executing command: %s auth token", ghPath)
@@ -141,42 +141,59 @@ func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err
 	log.Printf("Searching for PRs with query: %s", query)
 	searchStart := time.Now()
 
-	// Create timeout context for GitHub API call
-	githubCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	var result *github.IssuesSearchResult
+	var resp *github.Response
+	err = retry.Do(func() error {
+		// Create timeout context for GitHub API call
+		githubCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 
-	result, resp, err := app.client.Search.Issues(githubCtx, query, opts)
-	if err != nil {
-		// Enhanced error handling with specific cases
-		if resp != nil {
-			const (
-				httpStatusUnauthorized  = 401
-				httpStatusForbidden     = 403
-				httpStatusUnprocessable = 422
-			)
-			switch resp.StatusCode {
-			case httpStatusForbidden:
-				if resp.Header.Get("X-Ratelimit-Remaining") == "0" {
-					resetTime := resp.Header.Get("X-Ratelimit-Reset")
-					log.Printf("GitHub API rate limited, reset at: %s", resetTime)
-					return nil, nil, fmt.Errorf("github API rate limited, try again later: %w", err)
+		var retryErr error
+		result, resp, retryErr = app.client.Search.Issues(githubCtx, query, opts)
+		if retryErr != nil {
+			// Enhanced error handling with specific cases
+			if resp != nil {
+				const (
+					httpStatusUnauthorized  = 401
+					httpStatusForbidden     = 403
+					httpStatusUnprocessable = 422
+				)
+				switch resp.StatusCode {
+				case httpStatusForbidden:
+					if resp.Header.Get("X-Ratelimit-Remaining") == "0" {
+						resetTime := resp.Header.Get("X-Ratelimit-Reset")
+						log.Printf("GitHub API rate limited, reset at: %s (will retry)", resetTime)
+						return retryErr // Retry on rate limit
+					}
+					log.Print("GitHub API access forbidden (check token permissions)")
+					return retry.Unrecoverable(fmt.Errorf("github API access forbidden: %w", retryErr))
+				case httpStatusUnauthorized:
+					log.Print("GitHub API authentication failed (check token)")
+					return retry.Unrecoverable(fmt.Errorf("github API authentication failed: %w", retryErr))
+				case httpStatusUnprocessable:
+					log.Printf("GitHub API query invalid: %s", query)
+					return retry.Unrecoverable(fmt.Errorf("github API query invalid: %w", retryErr))
+				default:
+					log.Printf("GitHub API error (status %d): %v (will retry)", resp.StatusCode, retryErr)
 				}
-				log.Print("GitHub API access forbidden (check token permissions)")
-				return nil, nil, fmt.Errorf("github API access forbidden: %w", err)
-			case httpStatusUnauthorized:
-				log.Print("GitHub API authentication failed (check token)")
-				return nil, nil, fmt.Errorf("github API authentication failed: %w", err)
-			case httpStatusUnprocessable:
-				log.Printf("GitHub API query invalid: %s", query)
-				return nil, nil, fmt.Errorf("github API query invalid: %w", err)
-			default:
-				log.Printf("GitHub API error (status %d): %v", resp.StatusCode, err)
+			} else {
+				// Likely network error - retry these
+				log.Printf("GitHub API network error: %v (will retry)", retryErr)
 			}
-		} else {
-			// Likely network error
-			log.Printf("GitHub API network error: %v", err)
+			return retryErr
 		}
-		return nil, nil, fmt.Errorf("search PRs: %w", err)
+		return nil
+	},
+		retry.Attempts(maxRetries),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(maxRetryDelay),
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("GitHub Search.Issues retry %d/%d: %v", n+1, maxRetries, err)
+		}),
+		retry.Context(ctx),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("search PRs after %d retries: %w", maxRetries, err)
 	}
 
 	log.Printf("GitHub search completed in %v, found %d PRs", time.Since(searchStart), len(result.Issues))
@@ -288,30 +305,11 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 		go func(issue *github.Issue) {
 			defer wg.Done()
 
-			// Retry logic for Turn API with exponential backoff and jitter
-			var turnData *turn.CheckResponse
-			var err error
+			url := issue.GetHTMLURL()
+			updatedAt := issue.GetUpdatedAt().Time
 
-			turnData, err = retry.DoWithData(
-				func() (*turn.CheckResponse, error) {
-					data, apiErr := app.turnData(ctx, issue.GetHTMLURL(), issue.GetUpdatedAt().Time)
-					if apiErr != nil {
-						log.Printf("Turn API attempt failed for %s: %v", issue.GetHTMLURL(), apiErr)
-					}
-					return data, apiErr
-				},
-				retry.Context(ctx),
-				retry.Attempts(5),                             // 5 attempts max
-				retry.Delay(500*time.Millisecond),             // Start with 500ms
-				retry.MaxDelay(30*time.Second),                // Cap at 30 seconds
-				retry.DelayType(retry.FullJitterBackoffDelay), // Exponential backoff with jitter
-				retry.OnRetry(func(attempt uint, err error) {
-					log.Printf("Turn API retry attempt %d for %s: %v", attempt, issue.GetHTMLURL(), err)
-				}),
-			)
-			if err != nil {
-				log.Printf("Turn API failed after all retries for %s: %v", issue.GetHTMLURL(), err)
-			}
+			// Call turnData - it now has proper exponential backoff with jitter
+			turnData, err := app.turnData(ctx, url, updatedAt)
 
 			results <- prResult{
 				url:      issue.GetHTMLURL(),
@@ -340,21 +338,8 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 	const minUpdateInterval = 500 * time.Millisecond
 
 	for result := range results {
-		// Debug logging for PR #1203 - check all responses
-		if strings.Contains(result.url, "1203") {
-			log.Printf("[TURN] DEBUG PR #1203: result.err=%v, turnData=%v", result.err, result.turnData != nil)
-			if result.turnData != nil {
-				log.Printf("[TURN] DEBUG PR #1203: PRState.UnblockAction=%v", result.turnData.PRState.UnblockAction != nil)
-			}
-		}
-
 		if result.err == nil && result.turnData != nil && result.turnData.PRState.UnblockAction != nil {
 			turnSuccesses++
-
-			// Debug logging for PR #1203
-			if strings.Contains(result.url, "1203") {
-				log.Printf("[TURN] DEBUG PR #1203: UnblockAction keys: %+v", result.turnData.PRState.UnblockAction)
-			}
 
 			// Check if user needs to review and get action reason
 			needsReview := false

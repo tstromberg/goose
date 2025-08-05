@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeGROOVE-dev/retry"
 	"github.com/energye/systray"
 	"github.com/gen2brain/beeep"
 	"github.com/google/go-github/v57/github"
@@ -39,6 +40,10 @@ const (
 
 	// Update intervals.
 	updateInterval = 5 * time.Minute // Reduced frequency to avoid rate limits
+
+	// Retry settings for external API calls - exponential backoff with jitter up to 2 minutes.
+	maxRetryDelay = 2 * time.Minute
+	maxRetries    = 10 // Should reach 2 minutes with exponential backoff
 )
 
 // PR represents a pull request with metadata.
@@ -88,6 +93,7 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Starting GitHub PR Monitor (version=%s, commit=%s, date=%s)", version, commit, date)
+	log.Printf("Retry configuration: max_retries=%d, max_delay=%v", maxRetries, maxRetryDelay)
 
 	ctx := context.Background()
 
@@ -118,9 +124,26 @@ func main() {
 	}
 
 	log.Println("Loading current user...")
-	user, _, err := app.client.Users.Get(ctx, "")
+	var user *github.User
+	err = retry.Do(func() error {
+		var retryErr error
+		user, _, retryErr = app.client.Users.Get(ctx, "")
+		if retryErr != nil {
+			log.Printf("GitHub Users.Get failed (will retry): %v", retryErr)
+			return retryErr
+		}
+		return nil
+	},
+		retry.Attempts(maxRetries),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(maxRetryDelay),
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("GitHub Users.Get retry %d/%d: %v", n+1, maxRetries, err)
+		}),
+		retry.Context(ctx),
+	)
 	if err != nil {
-		log.Fatalf("Failed to load current user: %v", err)
+		log.Fatalf("Failed to load current user after %d retries: %v", maxRetries, err)
 	}
 	app.currentUser = user
 

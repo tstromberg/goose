@@ -202,7 +202,6 @@ func (app *App) updatePRMenuItem(pr PR) {
 		tooltip := fmt.Sprintf("%s (%s)", pr.Title, formatAge(pr.UpdatedAt))
 		if (pr.NeedsReview || pr.IsBlocked) && pr.ActionReason != "" {
 			tooltip = fmt.Sprintf("%s - %s", tooltip, pr.ActionReason)
-			log.Printf("[MENU] DEBUG: Updating tooltip for %s with actionReason: %q -> %q", pr.URL, pr.ActionReason, tooltip)
 		}
 
 		log.Printf("[MENU] Updating PR menu item for %s: '%s' -> '%s'", pr.URL, oldTitle, title)
@@ -215,7 +214,7 @@ func (app *App) updatePRMenuItem(pr PR) {
 
 // addPRMenuItem adds a menu item for a pull request.
 // NOTE: Caller must hold app.mu.Lock() when calling this function.
-func (app *App) addPRMenuItem(ctx context.Context, pr PR, _ bool) {
+func (app *App) addPRMenuItem(ctx context.Context, pr PR) {
 	title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
 	// Add bullet point for PRs where user is blocking
 	if pr.NeedsReview {
@@ -225,7 +224,6 @@ func (app *App) addPRMenuItem(ctx context.Context, pr PR, _ bool) {
 	// Add action reason for blocked PRs
 	if (pr.NeedsReview || pr.IsBlocked) && pr.ActionReason != "" {
 		tooltip = fmt.Sprintf("%s - %s", tooltip, pr.ActionReason)
-		log.Printf("[MENU] DEBUG: Setting tooltip for %s with actionReason: %q -> %q", pr.URL, pr.ActionReason, tooltip)
 	}
 
 	// Check if menu item already exists
@@ -244,18 +242,17 @@ func (app *App) addPRMenuItem(ctx context.Context, pr PR, _ bool) {
 	app.menuItems = append(app.menuItems, item)
 	app.prMenuItems[pr.URL] = item
 
-	// Capture URL and context properly to avoid loop variable capture bug
-	item.Click(func(capturedCtx context.Context, url string) func() {
-		return func() {
-			if err := openURL(capturedCtx, url); err != nil {
-				log.Printf("failed to open url: %v", err)
-			}
+	// Capture URL to avoid loop variable capture bug
+	prURL := pr.URL
+	item.Click(func() {
+		if err := openURL(ctx, prURL); err != nil {
+			log.Printf("failed to open url: %v", err)
 		}
-	}(ctx, pr.URL))
+	})
 }
 
 // addPRSection adds a section of PRs to the menu.
-func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string, blockedCount int, isOutgoing bool) {
+func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string, blockedCount int) {
 	if len(prs) == 0 {
 		return
 	}
@@ -294,7 +291,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		if app.hideStaleIncoming && isStale(prs[i].UpdatedAt) {
 			continue
 		}
-		app.addPRMenuItem(ctx, prs[i], isOutgoing)
+		app.addPRMenuItem(ctx, prs[i])
 	}
 
 	app.mu.Unlock()
@@ -400,14 +397,14 @@ func (app *App) updateMenu(ctx context.Context) {
 
 	// Incoming section
 	if incomingCount > 0 {
-		app.addPRSection(ctx, app.incoming, "Incoming", incomingBlocked, false)
+		app.addPRSection(ctx, app.incoming, "Incoming", incomingBlocked)
 	}
 
 	systray.AddSeparator()
 
 	// Outgoing section
 	if outgoingCount > 0 {
-		app.addPRSection(ctx, app.outgoing, "Outgoing", outgoingBlocked, true)
+		app.addPRSection(ctx, app.outgoing, "Outgoing", outgoingBlocked)
 	}
 
 	log.Print("[MENU] Menu update complete")

@@ -4,11 +4,13 @@ package main
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -84,8 +86,10 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 		case "darwin":
 			cmd = exec.CommandContext(soundCtx, "afplay", soundPath)
 		case "windows":
-			// Use PowerShell's SoundPlayer
-			script := `(New-Object Media.SoundPlayer "` + soundPath + `").PlaySync()`
+			// Use PowerShell's SoundPlayer with proper escaping
+			//nolint:gocritic // Need literal quotes in PowerShell script
+			script := fmt.Sprintf(`(New-Object Media.SoundPlayer "%s").PlaySync()`,
+				strings.ReplaceAll(soundPath, `"`, `""`))
 			cmd = exec.CommandContext(soundCtx, "powershell", "-WindowStyle", "Hidden", "-c", script)
 		case "linux":
 			// Try paplay first (PulseAudio), then aplay (ALSA)
