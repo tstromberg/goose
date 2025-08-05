@@ -53,6 +53,7 @@ func (app *App) initSoundCache() {
 
 // playSound plays a cached sound file using platform-specific commands.
 func (app *App) playSound(ctx context.Context, soundType string) {
+	log.Printf("[SOUND] Playing %s sound", soundType)
 	// Ensure sounds are cached
 	app.initSoundCache()
 

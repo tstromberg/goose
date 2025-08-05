@@ -37,38 +37,3 @@ func TestIsStale(t *testing.T) {
 		})
 	}
 }
-
-// TestEscapeAppleScriptString tests were removed as the function was replaced
-// with validateAndEscapePathForAppleScript which is not exported
-func TestEscapeAppleScriptString(t *testing.T) {
-	t.Skip("escapeAppleScriptString was replaced with validateAndEscapePathForAppleScript")
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "simple string",
-			input:    "hello world",
-			expected: "hello world",
-		},
-		{
-			name:     "string with quotes",
-			input:    `hello "world"`,
-			expected: `hello \"world\"`,
-		},
-		{
-			name:     "string with backslashes",
-			input:    `hello\world`,
-			expected: `hello\\world`,
-		},
-		{
-			name:     "complex string",
-			input:    `path\to\"file"`,
-			expected: `path\\to\\\"file\"`,
-		},
-	}
-
-	// Tests removed - function was replaced
-	_ = tests
-}
