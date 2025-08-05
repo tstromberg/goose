@@ -22,9 +22,11 @@ The app appears in your menubar showing: `incoming / outgoing` PRs
 
 - **Smart Notifications**: Only alerts when YOU are the blocker (not just assigned)
 - **Sound Effects**: Audio cues for important PR events 🔊
+- **Detailed Tooltips**: Hover to see why you're blocking and what's needed
 - **Test-Aware**: Waits for CI to pass before notifying
 - **Zero Noise**: No pings for PRs that aren't actually blocked on you
 - **One-Click Access**: Open any PR instantly from the menubar
+- **Multi-User Support**: Track PRs for different GitHub accounts with `--user`
 
 ## Installation
 
