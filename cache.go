@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codeGROOVE-dev/retry"
 	"github.com/ready-to-review/turnclient/pkg/turn"
 )
 
@@ -54,13 +55,31 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		log.Printf("Cache miss for %s, fetching from Turn API", url)
 	}
 
-	// Just try once with timeout - if Turn API fails, it's not critical
-	turnCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	// Use exponential backoff with jitter for Turn API calls
+	var data *turn.CheckResponse
+	err := retry.Do(func() error {
+		// Create timeout context for Turn API call
+		turnCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
 
-	data, err := app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), updatedAt)
+		var retryErr error
+		data, retryErr = app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), updatedAt)
+		if retryErr != nil {
+			log.Printf("Turn API error (will retry): %v", retryErr)
+			return retryErr
+		}
+		return nil
+	},
+		retry.Attempts(maxRetries),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(maxRetryDelay),
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("Turn API retry %d/%d for %s: %v", n+1, maxRetries, url, err)
+		}),
+		retry.Context(ctx),
+	)
 	if err != nil {
-		log.Printf("Turn API error (will use PR without metadata): %v", err)
+		log.Printf("Turn API error after %d retries (will use PR without metadata): %v", maxRetries, err)
 		return nil, err
 	}
 
