@@ -226,7 +226,7 @@ func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err
 }
 
 // updatePRData updates PR data with Turn API results.
-func (app *App) updatePRData(url string, needsReview bool, isOwner bool) *PR {
+func (app *App) updatePRData(url string, needsReview bool, isOwner bool, actionReason string) *PR {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
@@ -236,6 +236,7 @@ func (app *App) updatePRData(url string, needsReview bool, isOwner bool) *PR {
 			if app.outgoing[i].URL == url {
 				app.outgoing[i].NeedsReview = needsReview
 				app.outgoing[i].IsBlocked = needsReview
+				app.outgoing[i].ActionReason = actionReason
 				return &app.outgoing[i]
 			}
 		}
@@ -244,6 +245,7 @@ func (app *App) updatePRData(url string, needsReview bool, isOwner bool) *PR {
 		for i := range app.incoming {
 			if app.incoming[i].URL == url {
 				app.incoming[i].NeedsReview = needsReview
+				app.incoming[i].ActionReason = actionReason
 				return &app.incoming[i]
 			}
 		}
@@ -338,22 +340,40 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 	const minUpdateInterval = 500 * time.Millisecond
 
 	for result := range results {
+		// Debug logging for PR #1203 - check all responses
+		if strings.Contains(result.url, "1203") {
+			log.Printf("[TURN] DEBUG PR #1203: result.err=%v, turnData=%v", result.err, result.turnData != nil)
+			if result.turnData != nil {
+				log.Printf("[TURN] DEBUG PR #1203: PRState.UnblockAction=%v", result.turnData.PRState.UnblockAction != nil)
+			}
+		}
+
 		if result.err == nil && result.turnData != nil && result.turnData.PRState.UnblockAction != nil {
 			turnSuccesses++
 
-			// Check if user needs to review
+			// Debug logging for PR #1203
+			if strings.Contains(result.url, "1203") {
+				log.Printf("[TURN] DEBUG PR #1203: UnblockAction keys: %+v", result.turnData.PRState.UnblockAction)
+			}
+
+			// Check if user needs to review and get action reason
 			needsReview := false
-			if _, exists := result.turnData.PRState.UnblockAction[user]; exists {
+			actionReason := ""
+			if action, exists := result.turnData.PRState.UnblockAction[user]; exists {
 				needsReview = true
+				actionReason = action.Reason
+				log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
+			} else {
+				log.Printf("[TURN] No UnblockAction found for user %s on %s", user, result.url)
 			}
 
 			// Update the PR in our lists
-			pr := app.updatePRData(result.url, needsReview, result.isOwner)
+			pr := app.updatePRData(result.url, needsReview, result.isOwner, actionReason)
 
 			if pr != nil {
 				updatesApplied++
 				updateBatch++
-				log.Printf("[TURN] Turn data received for %s (needsReview=%v)", result.url, needsReview)
+				log.Printf("[TURN] Turn data received for %s (needsReview=%v, actionReason=%q)", result.url, needsReview, actionReason)
 				// Update the specific menu item immediately
 				app.updatePRMenuItem(*pr)
 

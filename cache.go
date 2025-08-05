@@ -29,23 +29,30 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	hash := sha256.Sum256([]byte(key))
 	cacheFile := filepath.Join(app.cacheDir, hex.EncodeToString(hash[:])[:16]+".json")
 
-	// Try to read from cache (gracefully handle all cache errors)
-	if data, readErr := os.ReadFile(cacheFile); readErr == nil {
-		var entry cacheEntry
-		if unmarshalErr := json.Unmarshal(data, &entry); unmarshalErr != nil {
-			log.Printf("Failed to unmarshal cache data for %s: %v", url, unmarshalErr)
-			// Remove corrupted cache file
-			if removeErr := os.Remove(cacheFile); removeErr != nil {
-				log.Printf("Failed to remove corrupted cache file: %v", removeErr)
+	// Skip cache if --no-cache flag is set
+	if !app.noCache {
+		// Try to read from cache (gracefully handle all cache errors)
+		if data, readErr := os.ReadFile(cacheFile); readErr == nil {
+			var entry cacheEntry
+			if unmarshalErr := json.Unmarshal(data, &entry); unmarshalErr != nil {
+				log.Printf("Failed to unmarshal cache data for %s: %v", url, unmarshalErr)
+				// Remove corrupted cache file
+				if removeErr := os.Remove(cacheFile); removeErr != nil {
+					log.Printf("Failed to remove corrupted cache file: %v", removeErr)
+				}
+			} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
+				// Check if cache is still valid (2 hour TTL)
+				return entry.Data, nil
 			}
-		} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
-			// Check if cache is still valid (2 hour TTL)
-			return entry.Data, nil
 		}
 	}
 
 	// Cache miss, fetch from API
-	log.Printf("Cache miss for %s, fetching from Turn API", url)
+	if app.noCache {
+		log.Printf("Cache bypassed for %s (--no-cache), fetching from Turn API", url)
+	} else {
+		log.Printf("Cache miss for %s, fetching from Turn API", url)
+	}
 
 	// Just try once with timeout - if Turn API fails, it's not critical
 	turnCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -57,20 +64,22 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		return nil, err
 	}
 
-	// Save to cache (don't fail if caching fails)
-	entry := cacheEntry{
-		Data:      data,
-		CachedAt:  time.Now(),
-		UpdatedAt: updatedAt,
-	}
-	if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
-		log.Printf("Failed to marshal cache data for %s: %v", url, marshalErr)
-	} else {
-		// Ensure cache directory exists
-		if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
-			log.Printf("Failed to create cache directory: %v", dirErr)
-		} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
-			log.Printf("Failed to write cache file for %s: %v", url, writeErr)
+	// Save to cache (don't fail if caching fails) - skip if --no-cache is set
+	if !app.noCache {
+		entry := cacheEntry{
+			Data:      data,
+			CachedAt:  time.Now(),
+			UpdatedAt: updatedAt,
+		}
+		if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
+			log.Printf("Failed to marshal cache data for %s: %v", url, marshalErr)
+		} else {
+			// Ensure cache directory exists
+			if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
+				log.Printf("Failed to create cache directory: %v", dirErr)
+			} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
+				log.Printf("Failed to write cache file for %s: %v", url, writeErr)
+			}
 		}
 	}
 

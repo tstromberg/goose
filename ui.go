@@ -197,8 +197,17 @@ func (app *App) updatePRMenuItem(pr PR) {
 		if pr.NeedsReview {
 			title = fmt.Sprintf("• %s", title)
 		}
+
+		// Update tooltip with action reason
+		tooltip := fmt.Sprintf("%s (%s)", pr.Title, formatAge(pr.UpdatedAt))
+		if (pr.NeedsReview || pr.IsBlocked) && pr.ActionReason != "" {
+			tooltip = fmt.Sprintf("%s - %s", tooltip, pr.ActionReason)
+			log.Printf("[MENU] DEBUG: Updating tooltip for %s with actionReason: %q -> %q", pr.URL, pr.ActionReason, tooltip)
+		}
+
 		log.Printf("[MENU] Updating PR menu item for %s: '%s' -> '%s'", pr.URL, oldTitle, title)
 		item.SetTitle(title)
+		item.SetTooltip(tooltip)
 	} else {
 		log.Printf("[MENU] WARNING: Tried to update non-existent PR menu item for %s", pr.URL)
 	}
@@ -213,6 +222,11 @@ func (app *App) addPRMenuItem(ctx context.Context, pr PR, _ bool) {
 		title = fmt.Sprintf("• %s", title)
 	}
 	tooltip := fmt.Sprintf("%s (%s)", pr.Title, formatAge(pr.UpdatedAt))
+	// Add action reason for blocked PRs
+	if (pr.NeedsReview || pr.IsBlocked) && pr.ActionReason != "" {
+		tooltip = fmt.Sprintf("%s - %s", tooltip, pr.ActionReason)
+		log.Printf("[MENU] DEBUG: Setting tooltip for %s with actionReason: %q -> %q", pr.URL, pr.ActionReason, tooltip)
+	}
 
 	// Check if menu item already exists
 	if existingItem, exists := app.prMenuItems[pr.URL]; exists {
