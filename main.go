@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log"
 	"os"
@@ -19,9 +18,6 @@ import (
 	"github.com/google/go-github/v57/github"
 	"github.com/ready-to-review/turnclient/pkg/turn"
 )
-
-//go:embed menubar-icon.png
-var embeddedIcon []byte
 
 // Version information - set during build with -ldflags.
 var (
@@ -69,6 +65,7 @@ type App struct {
 	consecutiveFailures int
 	mu                  sync.RWMutex
 	hideStaleIncoming   bool
+	initialLoadComplete bool
 }
 
 func main() {
@@ -120,7 +117,6 @@ func main() {
 
 func (app *App) onReady(ctx context.Context) {
 	log.Println("System tray ready")
-	systray.SetIcon(embeddedIcon)
 	systray.SetTitle("Loading PRs...")
 	systray.SetTooltip("GitHub PR Monitor")
 
@@ -228,12 +224,14 @@ func (app *App) updatePRs(ctx context.Context) {
 			if !app.hideStaleIncoming || !isStale(incoming[i].UpdatedAt) {
 				incomingBlocked++
 			}
-			// Send notification for newly blocked
-			if !oldBlockedPRs[incoming[i].URL] {
+			// Send notification and play sound if PR wasn't blocked before
+			// (only after initial load to avoid startup noise)
+			if app.initialLoadComplete && !oldBlockedPRs[incoming[i].URL] {
 				if err := beeep.Notify("PR Blocked on You",
 					fmt.Sprintf("%s #%d: %s", incoming[i].Repository, incoming[i].Number, incoming[i].Title), ""); err != nil {
 					log.Printf("Failed to send notification: %v", err)
 				}
+				app.playSound(ctx, "detective")
 			}
 		}
 	}
@@ -244,12 +242,14 @@ func (app *App) updatePRs(ctx context.Context) {
 			if !app.hideStaleIncoming || !isStale(outgoing[i].UpdatedAt) {
 				outgoingBlocked++
 			}
-			// Send notification for newly blocked
-			if !oldBlockedPRs[outgoing[i].URL] {
+			// Send notification and play sound if PR wasn't blocked before
+			// (only after initial load to avoid startup noise)
+			if app.initialLoadComplete && !oldBlockedPRs[outgoing[i].URL] {
 				if err := beeep.Notify("PR Blocked on You",
 					fmt.Sprintf("%s #%d: %s", outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title), ""); err != nil {
 					log.Printf("Failed to send notification: %v", err)
 				}
+				app.playSound(ctx, "rocket")
 			}
 		}
 	}
@@ -262,17 +262,25 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.mu.Unlock()
 
 	// Set title based on PR state
-	systray.SetIcon(embeddedIcon)
 	switch {
 	case incomingBlocked == 0 && outgoingBlocked == 0:
-		systray.SetTitle("")
+		systray.SetTitle("😊")
+	case incomingBlocked > 0 && outgoingBlocked > 0:
+		systray.SetTitle(fmt.Sprintf("🕵️ %d / 🚀 %d", incomingBlocked, outgoingBlocked))
 	case incomingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("%d/%d 🔴", incomingBlocked, outgoingBlocked))
+		systray.SetTitle(fmt.Sprintf("🕵️ %d", incomingBlocked))
 	default:
-		systray.SetTitle(fmt.Sprintf("0/%d 🚀", outgoingBlocked))
+		systray.SetTitle(fmt.Sprintf("🚀 %d", outgoingBlocked))
 	}
 
 	app.updateMenuIfChanged(ctx)
+
+	// Mark initial load as complete after first successful update
+	if !app.initialLoadComplete {
+		app.mu.Lock()
+		app.initialLoadComplete = true
+		app.mu.Unlock()
+	}
 }
 
 // isStale returns true if the PR hasn't been updated in over 90 days.
