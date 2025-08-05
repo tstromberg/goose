@@ -4,6 +4,12 @@ VERSION = 1.0.0
 BUNDLE_VERSION = 1
 BUNDLE_ID = dev.codegroove.r2r
 
+# Version information for builds
+GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS := -X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
+
 .PHONY: build clean deps run app-bundle install install-darwin install-unix install-windows
 
 # Install dependencies
@@ -24,9 +30,9 @@ endif
 # Build for current platform
 build:
 ifeq ($(OS),Windows_NT)
-	CGO_ENABLED=1 go build -ldflags -H=windowsgui -o $(APP_NAME).exe .
+	CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o $(APP_NAME).exe .
 else
-	CGO_ENABLED=1 go build -o $(APP_NAME) .
+	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(APP_NAME) .
 endif
 
 # Build for all platforms
@@ -34,18 +40,18 @@ build-all: build-darwin build-linux build-windows
 
 # Build for macOS
 build-darwin:
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -o out/$(APP_NAME)-darwin-amd64 .
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -o out/$(APP_NAME)-darwin-arm64 .
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 .
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 .
 
 # Build for Linux
 build-linux:
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o out/$(APP_NAME)-linux-amd64 .
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -o out/$(APP_NAME)-linux-arm64 .
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 .
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 .
 
 # Build for Windows
 build-windows:
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-amd64.exe .
-	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags -H=windowsgui -o out/$(APP_NAME)-windows-arm64.exe .
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe .
+	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe .
 
 # Clean build artifacts
 clean:
@@ -167,3 +173,61 @@ install-windows: build
 	@copy /Y "$(APP_NAME).exe" "%LOCALAPPDATA%\Programs\$(APP_NAME)\"
 	@echo "Installation complete! $(APP_NAME) has been installed to %LOCALAPPDATA%\Programs\$(APP_NAME)"
 	@echo "You may want to add %LOCALAPPDATA%\Programs\$(APP_NAME) to your PATH environment variable."
+# BEGIN: lint-install .
+# http://github.com/codeGROOVE-dev/lint-install
+
+.PHONY: lint
+lint: _lint
+
+LINT_ARCH := $(shell uname -m)
+LINT_OS := $(shell uname)
+LINT_OS_LOWER := $(shell echo $(LINT_OS) | tr '[:upper:]' '[:lower:]')
+LINT_ROOT := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+
+# shellcheck and hadolint lack arm64 native binaries: rely on x86-64 emulation
+ifeq ($(LINT_OS),Darwin)
+	ifeq ($(LINT_ARCH),arm64)
+		LINT_ARCH=x86_64
+	endif
+endif
+
+LINTERS :=
+FIXERS :=
+
+GOLANGCI_LINT_CONFIG := $(LINT_ROOT)/.golangci.yml
+GOLANGCI_LINT_VERSION ?= v2.3.1
+GOLANGCI_LINT_BIN := $(LINT_ROOT)/out/linters/golangci-lint-$(GOLANGCI_LINT_VERSION)-$(LINT_ARCH)
+$(GOLANGCI_LINT_BIN):
+	mkdir -p $(LINT_ROOT)/out/linters
+	rm -rf $(LINT_ROOT)/out/linters/golangci-lint-*
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(LINT_ROOT)/out/linters $(GOLANGCI_LINT_VERSION)
+	mv $(LINT_ROOT)/out/linters/golangci-lint $@
+
+LINTERS += golangci-lint-lint
+golangci-lint-lint: $(GOLANGCI_LINT_BIN)
+	find . -name go.mod -execdir "$(GOLANGCI_LINT_BIN)" run -c "$(GOLANGCI_LINT_CONFIG)" \;
+
+FIXERS += golangci-lint-fix
+golangci-lint-fix: $(GOLANGCI_LINT_BIN)
+	find . -name go.mod -execdir "$(GOLANGCI_LINT_BIN)" run -c "$(GOLANGCI_LINT_CONFIG)" --fix \;
+
+YAMLLINT_VERSION ?= 1.37.1
+YAMLLINT_ROOT := $(LINT_ROOT)/out/linters/yamllint-$(YAMLLINT_VERSION)
+YAMLLINT_BIN := $(YAMLLINT_ROOT)/dist/bin/yamllint
+$(YAMLLINT_BIN):
+	mkdir -p $(LINT_ROOT)/out/linters
+	rm -rf $(LINT_ROOT)/out/linters/yamllint-*
+	curl -sSfL https://github.com/adrienverge/yamllint/archive/refs/tags/v$(YAMLLINT_VERSION).tar.gz | tar -C $(LINT_ROOT)/out/linters -zxf -
+	cd $(YAMLLINT_ROOT) && pip3 install --target dist . || pip install --target dist .
+
+LINTERS += yamllint-lint
+yamllint-lint: $(YAMLLINT_BIN)
+	PYTHONPATH=$(YAMLLINT_ROOT)/dist $(YAMLLINT_ROOT)/dist/bin/yamllint .
+
+.PHONY: _lint $(LINTERS)
+_lint: $(LINTERS)
+
+.PHONY: fix $(FIXERS)
+fix: $(FIXERS)
+
+# END: lint-install .

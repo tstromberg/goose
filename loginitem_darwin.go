@@ -1,10 +1,11 @@
 //go:build darwin
-// +build darwin
 
 // Package main - loginitem_darwin.go provides macOS-specific login item management.
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,8 +16,18 @@ import (
 	"github.com/energye/systray"
 )
 
-// isLoginItem checks if the app is set to start at login
-func isLoginItem() bool {
+// escapeAppleScriptString safely escapes a string for use in AppleScript.
+// This prevents injection attacks by escaping quotes and backslashes.
+func escapeAppleScriptString(s string) string {
+	// Escape backslashes first
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	// Then escape quotes
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+// isLoginItem checks if the app is set to start at login.
+func isLoginItem(ctx context.Context) bool {
 	appPath, err := getAppPath()
 	if err != nil {
 		log.Printf("Failed to get app path: %v", err)
@@ -24,8 +35,14 @@ func isLoginItem() bool {
 	}
 
 	// Use osascript to check login items
-	script := fmt.Sprintf(`tell application "System Events" to get the name of every login item where path is "%s"`, appPath)
-	cmd := exec.Command("osascript", "-e", script)
+	escapedPath := escapeAppleScriptString(appPath)
+	// We use %s here because the string is already escaped by escapeAppleScriptString
+	//nolint:gocritic // already escaped
+	script := fmt.Sprintf(
+		`tell application "System Events" to get the name of every login item where path is "%s"`,
+		escapedPath)
+	log.Printf("Executing command: osascript -e %q", script)
+	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Failed to check login items: %v", err)
@@ -36,8 +53,8 @@ func isLoginItem() bool {
 	return result != ""
 }
 
-// setLoginItem adds or removes the app from login items
-func setLoginItem(enable bool) error {
+// setLoginItem adds or removes the app from login items.
+func setLoginItem(ctx context.Context, enable bool) error {
 	appPath, err := getAppPath()
 	if err != nil {
 		return fmt.Errorf("get app path: %w", err)
@@ -45,8 +62,14 @@ func setLoginItem(enable bool) error {
 
 	if enable {
 		// Add to login items
-		script := fmt.Sprintf(`tell application "System Events" to make login item at end with properties {path:"%s", hidden:false}`, appPath)
-		cmd := exec.Command("osascript", "-e", script)
+		escapedPath := escapeAppleScriptString(appPath)
+		// We use %s here because the string is already escaped by escapeAppleScriptString
+		//nolint:gocritic // already escaped
+		script := fmt.Sprintf(
+			`tell application "System Events" to make login item at end with properties {path:"%s", hidden:false}`,
+			escapedPath)
+		log.Printf("Executing command: osascript -e %q", script)
+		cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("add login item: %w (output: %s)", err, string(output))
 		}
@@ -55,8 +78,11 @@ func setLoginItem(enable bool) error {
 		// Remove from login items
 		appName := filepath.Base(appPath)
 		appName = strings.TrimSuffix(appName, ".app")
-		script := fmt.Sprintf(`tell application "System Events" to delete login item "%s"`, appName)
-		cmd := exec.Command("osascript", "-e", script)
+		escapedName := escapeAppleScriptString(appName)
+		// We use %s here because the string is already escaped by escapeAppleScriptString
+		script := fmt.Sprintf(`tell application "System Events" to delete login item "%s"`, escapedName) //nolint:gocritic // already escaped
+		log.Printf("Executing command: osascript -e %q", script)
+		cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			// Ignore error if item doesn't exist
 			if !strings.Contains(string(output), "Can't get login item") {
@@ -69,7 +95,7 @@ func setLoginItem(enable bool) error {
 	return nil
 }
 
-// isRunningFromAppBundle checks if the app is running from a .app bundle
+// isRunningFromAppBundle checks if the app is running from a .app bundle.
 func isRunningFromAppBundle() bool {
 	execPath, err := os.Executable()
 	if err != nil {
@@ -87,7 +113,7 @@ func isRunningFromAppBundle() bool {
 	return strings.Contains(execPath, ".app/Contents/MacOS/")
 }
 
-// getAppPath returns the path to the application bundle
+// getAppPath returns the path to the application bundle.
 func getAppPath() (string, error) {
 	// Get the executable path
 	execPath, err := os.Executable()
@@ -112,11 +138,11 @@ func getAppPath() (string, error) {
 	}
 
 	// Not running from an app bundle, return empty string to indicate this
-	return "", fmt.Errorf("not running from app bundle")
+	return "", errors.New("not running from app bundle")
 }
 
-// addLoginItemUI adds the login item menu option (macOS only)
-func addLoginItemUI(app *App) {
+// addLoginItemUI adds the login item menu option (macOS only).
+func addLoginItemUI(ctx context.Context, app *App) {
 	// Only show login item menu if running from an app bundle
 	if !isRunningFromAppBundle() {
 		log.Println("Hiding 'Start at Login' menu item - not running from app bundle")
@@ -127,15 +153,15 @@ func addLoginItemUI(app *App) {
 	app.menuItems = append(app.menuItems, loginItem)
 
 	// Set initial state
-	if isLoginItem() {
+	if isLoginItem(ctx) {
 		loginItem.Check()
 	}
 
 	loginItem.Click(func() {
-		isEnabled := isLoginItem()
+		isEnabled := isLoginItem(ctx)
 		newState := !isEnabled
 
-		if err := setLoginItem(newState); err != nil {
+		if err := setLoginItem(ctx, newState); err != nil {
 			log.Printf("Failed to set login item: %v", err)
 			// Revert the UI state on error
 			if isEnabled {

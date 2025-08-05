@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -21,8 +22,8 @@ type cacheEntry struct {
 	UpdatedAt time.Time           `json:"updated_at"`
 }
 
-// getTurnData fetches Turn API data with caching
-func (app *App) getTurnData(url string, updatedAt time.Time) (*turn.CheckResponse, error) {
+// turnData fetches Turn API data with caching.
+func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, error) {
 	// Create cache key from URL and updated timestamp
 	key := fmt.Sprintf("%s-%s", url, updatedAt.Format(time.RFC3339))
 	hash := sha256.Sum256([]byte(key))
@@ -41,8 +42,14 @@ func (app *App) getTurnData(url string, updatedAt time.Time) (*turn.CheckRespons
 
 	// Cache miss, fetch from API
 	log.Printf("Cache miss for %s, fetching from Turn API", url)
-	data, err := app.turnClient.Check(app.ctx, url, app.currentUser.GetLogin(), updatedAt)
+
+	// Just try once with timeout - if Turn API fails, it's not critical
+	turnCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	data, err := app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), updatedAt)
 	if err != nil {
+		log.Printf("Turn API error (will use PR without metadata): %v", err)
 		return nil, err
 	}
 
@@ -62,7 +69,7 @@ func (app *App) getTurnData(url string, updatedAt time.Time) (*turn.CheckRespons
 	return data, nil
 }
 
-// cleanupOldCache removes cache files older than 5 days
+// cleanupOldCache removes cache files older than 5 days.
 func (app *App) cleanupOldCache() {
 	entries, err := os.ReadDir(app.cacheDir)
 	if err != nil {
@@ -74,7 +81,6 @@ func (app *App) cleanupOldCache() {
 			continue
 		}
 
-		filePath := filepath.Join(app.cacheDir, entry.Name())
 		info, err := entry.Info()
 		if err != nil {
 			continue
@@ -82,22 +88,9 @@ func (app *App) cleanupOldCache() {
 
 		// Remove cache files older than 5 days
 		if time.Since(info.ModTime()) > cacheCleanupInterval {
-			log.Printf("Removing old cache file: %s", entry.Name())
-			os.Remove(filePath)
+			if err := os.Remove(filepath.Join(app.cacheDir, entry.Name())); err != nil {
+				log.Printf("Failed to remove old cache: %v", err)
+			}
 		}
 	}
-}
-
-// startCacheCleanup starts periodic cache cleanup
-func (app *App) startCacheCleanup() {
-	// Initial cleanup
-	app.cleanupOldCache()
-
-	// Schedule periodic cleanup
-	ticker := time.NewTicker(24 * time.Hour)
-	go func() {
-		for range ticker.C {
-			app.cleanupOldCache()
-		}
-	}()
 }
