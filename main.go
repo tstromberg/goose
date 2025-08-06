@@ -51,14 +51,15 @@ const (
 
 // PR represents a pull request with metadata.
 type PR struct {
-	UpdatedAt    time.Time
-	Title        string
-	URL          string
-	Repository   string
-	ActionReason string // Action reason from Turn API when blocked
-	Number       int
-	IsBlocked    bool
-	NeedsReview  bool
+	UpdatedAt         time.Time
+	TurnDataAppliedAt time.Time
+	Title             string
+	URL               string
+	Repository        string
+	ActionReason      string
+	Number            int
+	IsBlocked         bool
+	NeedsReview       bool
 }
 
 // MenuState represents the current state of menu items for comparison.
@@ -85,6 +86,7 @@ type TurnResult struct {
 	ActionReason string
 	NeedsReview  bool
 	IsOwner      bool
+	WasFromCache bool // Track if this result came from cache
 }
 
 // App holds the application state.
@@ -427,15 +429,15 @@ func (app *App) buildCurrentMenuState() *MenuState {
 	now := time.Now()
 	staleThreshold := now.Add(-stalePRThreshold)
 
-	for _, pr := range app.incoming {
-		if !app.hideStaleIncoming || pr.UpdatedAt.After(staleThreshold) {
-			filteredIncoming = append(filteredIncoming, pr)
+	for i := range app.incoming {
+		if !app.hideStaleIncoming || app.incoming[i].UpdatedAt.After(staleThreshold) {
+			filteredIncoming = append(filteredIncoming, app.incoming[i])
 		}
 	}
 
-	for _, pr := range app.outgoing {
-		if !app.hideStaleIncoming || pr.UpdatedAt.After(staleThreshold) {
-			filteredOutgoing = append(filteredOutgoing, pr)
+	for i := range app.outgoing {
+		if !app.hideStaleIncoming || app.outgoing[i].UpdatedAt.After(staleThreshold) {
+			filteredOutgoing = append(filteredOutgoing, app.outgoing[i])
 		}
 	}
 
@@ -445,28 +447,28 @@ func (app *App) buildCurrentMenuState() *MenuState {
 
 	// Build menu item states
 	incomingItems := make([]MenuItemState, len(incomingSorted))
-	for i, pr := range incomingSorted {
+	for i := range incomingSorted {
 		incomingItems[i] = MenuItemState{
-			URL:          pr.URL,
-			Title:        pr.Title,
-			Repository:   pr.Repository,
-			Number:       pr.Number,
-			NeedsReview:  pr.NeedsReview,
+			URL:          incomingSorted[i].URL,
+			Title:        incomingSorted[i].Title,
+			Repository:   incomingSorted[i].Repository,
+			Number:       incomingSorted[i].Number,
+			NeedsReview:  incomingSorted[i].NeedsReview,
 			IsBlocked:    false, // incoming PRs don't use IsBlocked
-			ActionReason: pr.ActionReason,
+			ActionReason: incomingSorted[i].ActionReason,
 		}
 	}
 
 	outgoingItems := make([]MenuItemState, len(outgoingSorted))
-	for i, pr := range outgoingSorted {
+	for i := range outgoingSorted {
 		outgoingItems[i] = MenuItemState{
-			URL:          pr.URL,
-			Title:        pr.Title,
-			Repository:   pr.Repository,
-			Number:       pr.Number,
-			NeedsReview:  pr.NeedsReview,
-			IsBlocked:    pr.IsBlocked,
-			ActionReason: pr.ActionReason,
+			URL:          outgoingSorted[i].URL,
+			Title:        outgoingSorted[i].Title,
+			Repository:   outgoingSorted[i].Repository,
+			Number:       outgoingSorted[i].Number,
+			NeedsReview:  outgoingSorted[i].NeedsReview,
+			IsBlocked:    outgoingSorted[i].IsBlocked,
+			ActionReason: outgoingSorted[i].ActionReason,
 		}
 	}
 
@@ -482,18 +484,8 @@ func (app *App) updateMenuIfChanged(ctx context.Context) {
 	app.mu.RLock()
 	// Skip menu updates while Turn data is still loading to avoid excessive rebuilds
 	if app.loadingTurnData {
-		// But still save the current state for future comparisons
-		currentMenuState := app.buildCurrentMenuState()
-		if app.lastMenuState == nil {
-			log.Print("[MENU] Skipping menu update - Turn data still loading, but saving state for future comparison")
-			app.mu.RUnlock()
-			app.mu.Lock()
-			app.lastMenuState = currentMenuState
-			app.mu.Unlock()
-		} else {
-			app.mu.RUnlock()
-			log.Print("[MENU] Skipping menu update - Turn data still loading")
-		}
+		app.mu.RUnlock()
+		log.Print("[MENU] Skipping menu update - Turn data still loading")
 		return
 	}
 	log.Print("[MENU] *** updateMenuIfChanged called - calculating diff ***")
