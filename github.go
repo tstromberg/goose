@@ -230,11 +230,11 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 	}
 
 	log.Printf("[GITHUB] Found %d incoming, %d outgoing PRs from GitHub", len(incoming), len(outgoing))
-	for _, pr := range incoming {
-		log.Printf("[GITHUB] Incoming PR: %s", pr.URL)
+	for i := range incoming {
+		log.Printf("[GITHUB] Incoming PR: %s", incoming[i].URL)
 	}
-	for _, pr := range outgoing {
-		log.Printf("[GITHUB] Outgoing PR: %s", pr.URL)
+	for i := range outgoing {
+		log.Printf("[GITHUB] Outgoing PR: %s", outgoing[i].URL)
 	}
 
 	// Fetch Turn API data
@@ -255,41 +255,63 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 }
 
 // updatePRData updates PR data with Turn API results.
-func (app *App) updatePRData(url string, needsReview bool, isOwner bool, actionReason string) *PR {
+func (app *App) updatePRData(url string, needsReview bool, isOwner bool, actionReason string) (*PR, bool) {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
 	if isOwner {
 		// Update outgoing PRs
 		for i := range app.outgoing {
-			if app.outgoing[i].URL == url {
-				app.outgoing[i].NeedsReview = needsReview
-				app.outgoing[i].IsBlocked = needsReview
-				app.outgoing[i].ActionReason = actionReason
-				return &app.outgoing[i]
+			if app.outgoing[i].URL != url {
+				continue
 			}
+			// Check if Turn data was already applied for this UpdatedAt
+			now := time.Now()
+			if app.outgoing[i].TurnDataAppliedAt.After(app.outgoing[i].UpdatedAt) {
+				// Turn data already applied for this PR version, no change
+				return &app.outgoing[i], false
+			}
+			changed := app.outgoing[i].NeedsReview != needsReview ||
+				app.outgoing[i].IsBlocked != needsReview ||
+				app.outgoing[i].ActionReason != actionReason
+			app.outgoing[i].NeedsReview = needsReview
+			app.outgoing[i].IsBlocked = needsReview
+			app.outgoing[i].ActionReason = actionReason
+			app.outgoing[i].TurnDataAppliedAt = now
+			return &app.outgoing[i], changed
 		}
 	} else {
 		// Update incoming PRs
 		for i := range app.incoming {
-			if app.incoming[i].URL == url {
-				app.incoming[i].NeedsReview = needsReview
-				app.incoming[i].ActionReason = actionReason
-				return &app.incoming[i]
+			if app.incoming[i].URL != url {
+				continue
 			}
+			// Check if Turn data was already applied for this UpdatedAt
+			now := time.Now()
+			if app.incoming[i].TurnDataAppliedAt.After(app.incoming[i].UpdatedAt) {
+				// Turn data already applied for this PR version, no change
+				return &app.incoming[i], false
+			}
+			changed := app.incoming[i].NeedsReview != needsReview ||
+				app.incoming[i].ActionReason != actionReason
+			app.incoming[i].NeedsReview = needsReview
+			app.incoming[i].ActionReason = actionReason
+			app.incoming[i].TurnDataAppliedAt = now
+			return &app.incoming[i], changed
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // fetchTurnDataSync fetches Turn API data synchronously and updates PRs directly.
 func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, user string, incoming *[]PR, outgoing *[]PR) {
 	turnStart := time.Now()
 	type prResult struct {
-		err      error
-		turnData *turn.CheckResponse
-		url      string
-		isOwner  bool
+		err          error
+		turnData     *turn.CheckResponse
+		url          string
+		isOwner      bool
+		wasFromCache bool
 	}
 
 	// Create a channel for results
@@ -312,13 +334,14 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			updatedAt := issue.GetUpdatedAt().Time
 
 			// Call turnData - it now has proper exponential backoff with jitter
-			turnData, err := app.turnData(ctx, url, updatedAt)
+			turnData, wasFromCache, err := app.turnData(ctx, url, updatedAt)
 
 			results <- prResult{
-				url:      issue.GetHTMLURL(),
-				turnData: turnData,
-				err:      err,
-				isOwner:  issue.GetUser().GetLogin() == user,
+				url:          issue.GetHTMLURL(),
+				turnData:     turnData,
+				err:          err,
+				isOwner:      issue.GetUser().GetLogin() == user,
+				wasFromCache: wasFromCache,
 			}
 		}(issue)
 	}
@@ -381,10 +404,11 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 
 	turnStart := time.Now()
 	type prResult struct {
-		err      error
-		turnData *turn.CheckResponse
-		url      string
-		isOwner  bool
+		err          error
+		turnData     *turn.CheckResponse
+		url          string
+		isOwner      bool
+		wasFromCache bool
 	}
 
 	// Create a channel for results
@@ -407,13 +431,14 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 			updatedAt := issue.GetUpdatedAt().Time
 
 			// Call turnData - it now has proper exponential backoff with jitter
-			turnData, err := app.turnData(ctx, url, updatedAt)
+			turnData, wasFromCache, err := app.turnData(ctx, url, updatedAt)
 
 			results <- prResult{
-				url:      issue.GetHTMLURL(),
-				turnData: turnData,
-				err:      err,
-				isOwner:  issue.GetUser().GetLogin() == user,
+				url:          issue.GetHTMLURL(),
+				turnData:     turnData,
+				err:          err,
+				isOwner:      issue.GetUser().GetLogin() == user,
+				wasFromCache: wasFromCache,
 			}
 		}(issue)
 	}
@@ -442,7 +467,8 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 				needsReview = true
 				actionReason = action.Reason
 				log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
-			} else {
+			} else if !result.wasFromCache {
+				// Only log "no action" for fresh API results, not cached ones
 				log.Printf("[TURN] No UnblockAction found for user %s on %s", user, result.url)
 			}
 
@@ -452,6 +478,7 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 				NeedsReview:  needsReview,
 				IsOwner:      result.isOwner,
 				ActionReason: actionReason,
+				WasFromCache: result.wasFromCache,
 			}
 
 			app.mu.Lock()
@@ -459,7 +486,14 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 			app.mu.Unlock()
 
 			updatesApplied++
-			log.Printf("[TURN] Turn data received for %s (needsReview=%v, actionReason=%q) - buffered", result.url, needsReview, actionReason)
+			// Reduce verbosity - only log if not from cache or if blocked
+			if !result.wasFromCache || needsReview {
+				cacheStatus := "fresh"
+				if result.wasFromCache {
+					cacheStatus = "cached"
+				}
+				log.Printf("[TURN] %s data for %s (needsReview=%v, actionReason=%q)", cacheStatus, result.url, needsReview, actionReason)
+			}
 		} else if result.err != nil {
 			turnFailures++
 		}
@@ -475,15 +509,36 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 	app.loadingTurnData = false
 	app.mu.Unlock()
 
-	log.Printf("[TURN] Applying %d buffered Turn results", len(pendingResults))
+	// Check if any results came from fresh API calls (not cache)
+	var cacheHits, freshResults int
 	for _, result := range pendingResults {
-		app.updatePRData(result.URL, result.NeedsReview, result.IsOwner, result.ActionReason)
+		if result.WasFromCache {
+			cacheHits++
+		} else {
+			freshResults++
+		}
+	}
+
+	log.Printf("[TURN] Applying %d buffered Turn results (%d from cache, %d fresh)", len(pendingResults), cacheHits, freshResults)
+
+	// Track how many PRs actually changed
+	var actualChanges int
+	for _, result := range pendingResults {
+		_, changed := app.updatePRData(result.URL, result.NeedsReview, result.IsOwner, result.ActionReason)
+		if changed {
+			actualChanges++
+		}
 	}
 
 	// Update tray title and menu with final Turn data if menu is already initialized
 	app.setTrayTitle()
 	if app.menuInitialized {
-		log.Print("[TURN] Turn data loaded, checking if menu needs update")
-		app.updateMenuIfChanged(ctx)
+		// Only trigger menu update if PR data actually changed
+		if actualChanges > 0 {
+			log.Printf("[TURN] Turn data applied - %d PRs actually changed, checking if menu needs update", actualChanges)
+			app.updateMenuIfChanged(ctx)
+		} else {
+			log.Print("[TURN] Turn data applied - no PR changes detected (cached data unchanged), skipping menu update")
+		}
 	}
 }

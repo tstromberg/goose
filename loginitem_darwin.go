@@ -36,7 +36,7 @@ func validateAndEscapePathForAppleScript(path string) string {
 
 // isLoginItem checks if the app is set to start at login.
 func isLoginItem(ctx context.Context) bool {
-	appPath, err := getAppPath()
+	appPath, err := appPath()
 	if err != nil {
 		log.Printf("Failed to get app path: %v", err)
 		return false
@@ -67,7 +67,7 @@ func isLoginItem(ctx context.Context) bool {
 
 // setLoginItem adds or removes the app from login items.
 func setLoginItem(ctx context.Context, enable bool) error {
-	appPath, err := getAppPath()
+	appPath, err := appPath()
 	if err != nil {
 		return fmt.Errorf("get app path: %w", err)
 	}
@@ -131,8 +131,8 @@ func isRunningFromAppBundle() bool {
 	return strings.Contains(execPath, ".app/Contents/MacOS/")
 }
 
-// getAppPath returns the path to the application bundle.
-func getAppPath() (string, error) {
+// appPath returns the path to the application bundle.
+func appPath() (string, error) {
 	// Get the executable path
 	execPath, err := os.Executable()
 	if err != nil {

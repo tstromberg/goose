@@ -24,7 +24,7 @@ type cacheEntry struct {
 }
 
 // turnData fetches Turn API data with caching.
-func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, error) {
+func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, bool, error) {
 	// Create cache key from URL and updated timestamp
 	key := fmt.Sprintf("%s-%s", url, updatedAt.Format(time.RFC3339))
 	hash := sha256.Sum256([]byte(key))
@@ -43,7 +43,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 				}
 			} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
 				// Check if cache is still valid (2 hour TTL)
-				return entry.Data, nil
+				return entry.Data, true, nil
 			}
 		}
 	}
@@ -80,7 +80,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	)
 	if err != nil {
 		log.Printf("Turn API error after %d retries (will use PR without metadata): %v", maxRetries, err)
-		return nil, err
+		return nil, false, err
 	}
 
 	// Save to cache (don't fail if caching fails) - skip if --no-cache is set
@@ -102,7 +102,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		}
 	}
 
-	return data, nil
+	return data, false, nil
 }
 
 // cleanupOldCache removes cache files older than 5 days.
