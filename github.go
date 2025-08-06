@@ -119,18 +119,9 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-// fetchPRs retrieves all PRs involving the current user.
-// It returns GitHub data immediately and starts Turn API queries in the background.
-func (app *App) fetchPRs(ctx context.Context) (incoming []PR, outgoing []PR, err error) {
-	return app.fetchPRsInternal(ctx, false)
-}
-
-// fetchPRsWithWait fetches PRs and waits for Turn data to complete.
-func (app *App) fetchPRsWithWait(ctx context.Context) (incoming []PR, outgoing []PR, err error) {
-	return app.fetchPRsInternal(ctx, true)
-}
-
-// fetchPRsInternal is the common implementation for PR fetching.
+// fetchPRsInternal is the implementation for PR fetching.
+// It returns GitHub data immediately and starts Turn API queries in the background (when waitForTurn=false),
+// or waits for Turn data to complete (when waitForTurn=true).
 func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incoming []PR, outgoing []PR, err error) {
 	// Use targetUser if specified, otherwise use authenticated user
 	user := app.currentUser.GetLogin()

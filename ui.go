@@ -91,11 +91,16 @@ func openURL(ctx context.Context, rawURL string) error {
 	return nil
 }
 
+// PRCounts represents PR count information.
+type PRCounts struct {
+	IncomingTotal   int
+	IncomingBlocked int
+	OutgoingTotal   int
+	OutgoingBlocked int
+}
+
 // countPRs counts the number of PRs that need review/are blocked.
-// Returns: incomingCount, incomingBlocked, outgoingCount, outgoingBlocked
-//
-//nolint:revive,gocritic // 4 return values is clearer than a struct here
-func (app *App) countPRs() (int, int, int, int) {
+func (app *App) countPRs() PRCounts {
 	app.mu.RLock()
 	defer app.mu.RUnlock()
 
@@ -122,23 +127,28 @@ func (app *App) countPRs() (int, int, int, int) {
 			}
 		}
 	}
-	return incomingCount, incomingBlocked, outgoingCount, outgoingBlocked
+	return PRCounts{
+		IncomingTotal:   incomingCount,
+		IncomingBlocked: incomingBlocked,
+		OutgoingTotal:   outgoingCount,
+		OutgoingBlocked: outgoingBlocked,
+	}
 }
 
 // setTrayTitle updates the system tray title based on PR counts.
 func (app *App) setTrayTitle() {
-	_, incomingBlocked, _, outgoingBlocked := app.countPRs()
+	counts := app.countPRs()
 
 	// Set title based on PR state
 	switch {
-	case incomingBlocked == 0 && outgoingBlocked == 0:
+	case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
 		systray.SetTitle("😊")
-	case incomingBlocked > 0 && outgoingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("👀 %d 🎉 %d", incomingBlocked, outgoingBlocked))
-	case incomingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("👀 %d", incomingBlocked))
+	case counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0:
+		systray.SetTitle(fmt.Sprintf("👀 %d 🎉 %d", counts.IncomingBlocked, counts.OutgoingBlocked))
+	case counts.IncomingBlocked > 0:
+		systray.SetTitle(fmt.Sprintf("👀 %d", counts.IncomingBlocked))
 	default:
-		systray.SetTitle(fmt.Sprintf("🎉 %d", outgoingBlocked))
+		systray.SetTitle(fmt.Sprintf("🎉 %d", counts.OutgoingBlocked))
 	}
 }
 
@@ -213,17 +223,6 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	}
 }
 
-// initializeMenu creates the initial menu structure.
-func (app *App) initializeMenu(ctx context.Context) {
-	log.Print("[MENU] Initializing menu structure")
-
-	// Build the entire menu
-	app.rebuildMenu(ctx)
-
-	app.menuInitialized = true
-	log.Print("[MENU] Menu initialization complete")
-}
-
 // rebuildMenu completely rebuilds the menu from scratch.
 func (app *App) rebuildMenu(ctx context.Context) {
 	log.Print("[MENU] Rebuilding entire menu")
@@ -246,30 +245,30 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	systray.AddSeparator()
 
 	// Get PR counts
-	incomingCount, incomingBlocked, outgoingCount, outgoingBlocked := app.countPRs()
+	counts := app.countPRs()
 
 	// Handle "No pull requests" case
-	if incomingCount == 0 && outgoingCount == 0 {
+	if counts.IncomingTotal == 0 && counts.OutgoingTotal == 0 {
 		log.Print("[MENU] Creating 'No pull requests' item")
 		noPRs := systray.AddMenuItem("No pull requests", "")
 		noPRs.Disable()
 	} else {
 		// Incoming section
-		if incomingCount > 0 {
+		if counts.IncomingTotal > 0 {
 			app.mu.RLock()
 			incoming := app.incoming
 			app.mu.RUnlock()
-			app.addPRSection(ctx, incoming, "Incoming", incomingBlocked)
+			app.addPRSection(ctx, incoming, "Incoming", counts.IncomingBlocked)
 		}
 
 		systray.AddSeparator()
 
 		// Outgoing section
-		if outgoingCount > 0 {
+		if counts.OutgoingTotal > 0 {
 			app.mu.RLock()
 			outgoing := app.outgoing
 			app.mu.RUnlock()
-			app.addPRSection(ctx, outgoing, "Outgoing", outgoingBlocked)
+			app.addPRSection(ctx, outgoing, "Outgoing", counts.OutgoingBlocked)
 		}
 	}
 
