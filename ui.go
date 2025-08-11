@@ -144,9 +144,9 @@ func (app *App) setTrayTitle() {
 	case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
 		systray.SetTitle("😊")
 	case counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("👀 %d 🎉 %d", counts.IncomingBlocked, counts.OutgoingBlocked))
+		systray.SetTitle(fmt.Sprintf("🪿 %d 🎉 %d", counts.IncomingBlocked, counts.OutgoingBlocked))
 	case counts.IncomingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("👀 %d", counts.IncomingBlocked))
+		systray.SetTitle(fmt.Sprintf("🪿 %d", counts.IncomingBlocked))
 	default:
 		systray.SetTitle(fmt.Sprintf("🎉 %d", counts.OutgoingBlocked))
 	}
@@ -183,7 +183,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 
 	// Add header
 	headerText := fmt.Sprintf("%s — %d blocked on you", sectionTitle, blockedCount)
-	log.Printf("[MENU] Creating section header '%s': '%s'", sectionTitle, headerText)
+	// Create section header
 	header := systray.AddMenuItem(headerText, "")
 	header.Disable()
 
@@ -210,7 +210,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 			tooltip = fmt.Sprintf("%s - %s", tooltip, sortedPRs[i].ActionReason)
 		}
 
-		log.Printf("[MENU] Creating PR menu item for %s: '%s'", sortedPRs[i].URL, title)
+		// Create PR menu item
 		item := systray.AddMenuItem(title, tooltip)
 
 		// Capture URL to avoid loop variable capture bug
@@ -225,7 +225,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 
 // rebuildMenu completely rebuilds the menu from scratch.
 func (app *App) rebuildMenu(ctx context.Context) {
-	log.Print("[MENU] Rebuilding entire menu")
+	// Rebuild entire menu
 
 	// Clear all existing menu items
 	systray.ResetMenu()
@@ -234,7 +234,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	app.setTrayTitle()
 
 	// Dashboard at the top
-	log.Print("[MENU] Adding 'Dashboard' menu item at top")
+	// Add Dashboard link
 	dashboardItem := systray.AddMenuItem("Dashboard", "")
 	dashboardItem.Click(func() {
 		if err := openURL(ctx, "https://dash.ready-to-review.dev/"); err != nil {
@@ -249,7 +249,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 
 	// Handle "No pull requests" case
 	if counts.IncomingTotal == 0 && counts.OutgoingTotal == 0 {
-		log.Print("[MENU] Creating 'No pull requests' item")
+		// No PRs to display
 		noPRs := systray.AddMenuItem("No pull requests", "")
 		noPRs.Disable()
 	} else {
@@ -275,17 +275,17 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Add static items at the end
 	app.addStaticMenuItems(ctx)
 
-	log.Print("[MENU] Menu rebuild complete")
+	// Menu rebuild complete
 }
 
 // addStaticMenuItems adds the static menu items (hide stale, start at login, quit).
 func (app *App) addStaticMenuItems(ctx context.Context) {
-	log.Print("[MENU] Adding static menu items")
+	// Add static menu items
 
 	systray.AddSeparator()
 
 	// Hide stale PRs
-	log.Print("[MENU] Adding 'Hide stale PRs' menu item")
+	// Add 'Hide stale PRs' option
 	hideStaleItem := systray.AddMenuItem("Hide stale PRs (>90 days)", "")
 	if app.hideStaleIncoming {
 		hideStaleItem.Check()
@@ -297,10 +297,10 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		} else {
 			hideStaleItem.Uncheck()
 		}
-		log.Printf("Hide stale PRs: %v", app.hideStaleIncoming)
+		// Toggle hide stale PRs setting
 		// Force menu rebuild since hideStaleIncoming changed
 		app.mu.Lock()
-		log.Print("[MENU] *** CLEARING menu state due to hide stale toggle ***")
+		// Clear menu state to force rebuild
 		app.lastMenuState = nil
 		app.mu.Unlock()
 		app.rebuildMenu(ctx)
@@ -310,7 +310,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	addLoginItemUI(ctx, app)
 
 	// Quit
-	log.Print("[MENU] Adding 'Quit' menu item")
+	// Add 'Quit' option
 	quitItem := systray.AddMenuItem("Quit", "")
 	quitItem.Click(func() {
 		log.Println("Quit requested by user")

@@ -344,72 +344,13 @@ func (app *App) updatePRs(ctx context.Context) {
 	}
 
 	// Update health status on success
-	log.Printf("[UPDATE] Successfully fetched %d incoming, %d outgoing PRs", len(incoming), len(outgoing))
 	app.mu.Lock()
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
 	app.mu.Unlock()
 
-	// Check for newly blocked PRs and send notifications
-	// Use a single lock for all operations on previousBlockedPRs and initialLoadComplete
-	app.mu.Lock()
-	oldBlockedPRs := app.previousBlockedPRs
-	initialLoadComplete := app.initialLoadComplete
-	app.mu.Unlock()
-
-	log.Printf("[NOTIFY] Checking for newly blocked PRs (initialLoadComplete=%v, oldBlockedCount=%d)", initialLoadComplete, len(oldBlockedPRs))
-
-	currentBlockedPRs := make(map[string]bool)
-	var incomingBlocked, outgoingBlocked int
-
-	// Count blocked PRs and send notifications
-	for i := range incoming {
-		if incoming[i].NeedsReview {
-			currentBlockedPRs[incoming[i].URL] = true
-			if !app.hideStaleIncoming || !incoming[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
-				incomingBlocked++
-			}
-			// Send notification and play sound if PR wasn't blocked before
-			// (only after initial load to avoid startup noise)
-			if initialLoadComplete && !oldBlockedPRs[incoming[i].URL] {
-				log.Printf("[NOTIFY] Sending notification for newly blocked incoming PR: %s #%d", incoming[i].Repository, incoming[i].Number)
-				if err := beeep.Notify("PR Blocked on You",
-					fmt.Sprintf("%s #%d: %s", incoming[i].Repository, incoming[i].Number, incoming[i].Title), ""); err != nil {
-					log.Printf("Failed to send notification: %v", err)
-				}
-				app.playSound(ctx, "detective")
-			} else {
-				log.Printf("[NOTIFY] Skipping notification for incoming %s: initialLoadComplete=%v, wasBlocked=%v",
-					incoming[i].Repository, initialLoadComplete, oldBlockedPRs[incoming[i].URL])
-			}
-		}
-	}
-
-	for i := range outgoing {
-		if outgoing[i].IsBlocked {
-			currentBlockedPRs[outgoing[i].URL] = true
-			if !app.hideStaleIncoming || !outgoing[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
-				outgoingBlocked++
-			}
-			// Send notification and play sound if PR wasn't blocked before
-			// (only after initial load to avoid startup noise)
-			if initialLoadComplete && !oldBlockedPRs[outgoing[i].URL] {
-				log.Printf("[NOTIFY] Sending notification for newly blocked outgoing PR: %s #%d", outgoing[i].Repository, outgoing[i].Number)
-				if err := beeep.Notify("PR Blocked on You",
-					fmt.Sprintf("%s #%d: %s", outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title), ""); err != nil {
-					log.Printf("Failed to send notification: %v", err)
-				}
-				app.playSound(ctx, "rocket")
-			} else {
-				log.Printf("[NOTIFY] Skipping notification for outgoing %s: initialLoadComplete=%v, wasBlocked=%v",
-					outgoing[i].Repository, initialLoadComplete, oldBlockedPRs[outgoing[i].URL])
-			}
-		}
-	}
-
 	// Update state atomically
 	app.mu.Lock()
-	app.previousBlockedPRs = currentBlockedPRs
 	app.incoming = incoming
 	app.outgoing = outgoing
 	// Mark initial load as complete after first successful update
@@ -417,6 +358,9 @@ func (app *App) updatePRs(ctx context.Context) {
 		app.initialLoadComplete = true
 	}
 	app.mu.Unlock()
+
+	// Don't check for newly blocked PRs here - wait for Turn data
+	// Turn data will be applied asynchronously and will trigger the check
 
 	app.updateMenuIfChanged(ctx)
 }
@@ -488,34 +432,16 @@ func (app *App) updateMenuIfChanged(ctx context.Context) {
 		log.Print("[MENU] Skipping menu update - Turn data still loading")
 		return
 	}
-	log.Print("[MENU] *** updateMenuIfChanged called - calculating diff ***")
 	currentMenuState := app.buildCurrentMenuState()
 	lastMenuState := app.lastMenuState
-	if lastMenuState == nil {
-		log.Print("[MENU] *** lastMenuState is NIL - will do initial build ***")
-	} else {
-		log.Printf("[MENU] *** lastMenuState exists (incoming:%d, outgoing:%d) - will compare ***",
-			len(lastMenuState.IncomingItems), len(lastMenuState.OutgoingItems))
-	}
 	app.mu.RUnlock()
 
-	if lastMenuState != nil {
-		diff := cmp.Diff(lastMenuState, currentMenuState)
-		log.Printf("[MENU] *** DIFF CALCULATION RESULT ***:\n%s", diff)
-		if diff == "" {
-			log.Printf("[MENU] Menu state unchanged, skipping update (incoming:%d, outgoing:%d)",
-				len(currentMenuState.IncomingItems), len(currentMenuState.OutgoingItems))
-			return
-		}
-		log.Print("[MENU] *** DIFF DETECTED *** Menu state changed, rebuilding menu")
-	} else {
-		log.Printf("[MENU] Initial menu build (incoming:%d, outgoing:%d)",
-			len(currentMenuState.IncomingItems), len(currentMenuState.OutgoingItems))
+	// Only rebuild if menu changed
+	if lastMenuState != nil && cmp.Diff(lastMenuState, currentMenuState) == "" {
+		return
 	}
 
 	app.mu.Lock()
-	log.Printf("[MENU] *** SAVING menu state (incoming:%d, outgoing:%d) ***",
-		len(currentMenuState.IncomingItems), len(currentMenuState.OutgoingItems))
 	app.lastMenuState = currentMenuState
 	app.mu.Unlock()
 	app.rebuildMenu(ctx)
@@ -557,93 +483,33 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 
 		// Still create initial menu even on error
 		if !app.menuInitialized {
-			log.Println("Creating initial menu despite error")
-			log.Print("[MENU] Initializing menu structure")
+			// Create initial menu despite error
 			app.rebuildMenu(ctx)
 			app.menuInitialized = true
-			log.Print("[MENU] Menu initialization complete")
+			// Menu initialization complete
 		}
 		return
 	}
 
 	// Update health status on success
-	log.Printf("[UPDATE] Successfully fetched %d incoming, %d outgoing PRs", len(incoming), len(outgoing))
 	app.mu.Lock()
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
 	app.mu.Unlock()
 
-	// Check for newly blocked PRs and send notifications
-	// Use a single lock for all operations on previousBlockedPRs and initialLoadComplete
-	app.mu.Lock()
-	oldBlockedPRs := app.previousBlockedPRs
-	initialLoadComplete := app.initialLoadComplete
-	app.mu.Unlock()
-
-	log.Printf("[NOTIFY] Checking for newly blocked PRs (initialLoadComplete=%v, oldBlockedCount=%d)", initialLoadComplete, len(oldBlockedPRs))
-
-	currentBlockedPRs := make(map[string]bool)
-	var incomingBlocked, outgoingBlocked int
-
-	// Count blocked PRs and send notifications
-	for i := range incoming {
-		if incoming[i].NeedsReview {
-			currentBlockedPRs[incoming[i].URL] = true
-			if !app.hideStaleIncoming || !incoming[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
-				incomingBlocked++
-			}
-			// Send notification and play sound if PR wasn't blocked before
-			// (only after initial load to avoid startup noise)
-			if initialLoadComplete && !oldBlockedPRs[incoming[i].URL] {
-				log.Printf("[NOTIFY] Sending notification for newly blocked incoming PR: %s #%d", incoming[i].Repository, incoming[i].Number)
-				if err := beeep.Notify("PR Blocked on You",
-					fmt.Sprintf("%s #%d: %s", incoming[i].Repository, incoming[i].Number, incoming[i].Title), ""); err != nil {
-					log.Printf("Failed to send notification: %v", err)
-				}
-				app.playSound(ctx, "detective")
-			} else {
-				log.Printf("[NOTIFY] Skipping notification for incoming %s: initialLoadComplete=%v, wasBlocked=%v",
-					incoming[i].Repository, initialLoadComplete, oldBlockedPRs[incoming[i].URL])
-			}
-		}
-	}
-
-	for i := range outgoing {
-		if outgoing[i].IsBlocked {
-			currentBlockedPRs[outgoing[i].URL] = true
-			if !app.hideStaleIncoming || !outgoing[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
-				outgoingBlocked++
-			}
-			// Send notification and play sound if PR wasn't blocked before
-			// (only after initial load to avoid startup noise)
-			if initialLoadComplete && !oldBlockedPRs[outgoing[i].URL] {
-				log.Printf("[NOTIFY] Sending notification for newly blocked outgoing PR: %s #%d", outgoing[i].Repository, outgoing[i].Number)
-				if err := beeep.Notify("PR Blocked on You",
-					fmt.Sprintf("%s #%d: %s", outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title), ""); err != nil {
-					log.Printf("Failed to send notification: %v", err)
-				}
-				app.playSound(ctx, "rocket")
-			} else {
-				log.Printf("[NOTIFY] Skipping notification for outgoing %s: initialLoadComplete=%v, wasBlocked=%v",
-					outgoing[i].Repository, initialLoadComplete, oldBlockedPRs[outgoing[i].URL])
-			}
-		}
-	}
-
 	// Update state
 	app.mu.Lock()
-	app.previousBlockedPRs = currentBlockedPRs
 	app.incoming = incoming
 	app.outgoing = outgoing
 	app.mu.Unlock()
 
 	// Create initial menu after first successful data load
 	if !app.menuInitialized {
-		log.Println("Creating initial menu with Turn data")
-		log.Print("[MENU] Initializing menu structure")
+		// Create initial menu with Turn data
+		// Initialize menu structure
 		app.rebuildMenu(ctx)
 		app.menuInitialized = true
-		log.Print("[MENU] Menu initialization complete")
+		// Menu initialization complete
 	} else {
 		app.updateMenuIfChanged(ctx)
 	}
@@ -654,4 +520,100 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.initialLoadComplete = true
 		app.mu.Unlock()
 	}
+	// Check for newly blocked PRs
+	app.checkForNewlyBlockedPRs(ctx)
+}
+
+// checkForNewlyBlockedPRs checks for PRs that have become blocked and sends notifications.
+func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
+	app.mu.Lock()
+	oldBlockedPRs := app.previousBlockedPRs
+	if oldBlockedPRs == nil {
+		oldBlockedPRs = make(map[string]bool)
+	}
+	initialLoadComplete := app.initialLoadComplete
+	hideStaleIncoming := app.hideStaleIncoming
+	incoming := make([]PR, len(app.incoming))
+	copy(incoming, app.incoming)
+	outgoing := make([]PR, len(app.outgoing))
+	copy(outgoing, app.outgoing)
+	app.mu.Unlock()
+
+	// Only log when we're checking after initial load is complete
+	if initialLoadComplete && len(oldBlockedPRs) > 0 {
+		log.Printf("[NOTIFY] Checking for newly blocked PRs (oldBlockedCount=%d)", len(oldBlockedPRs))
+	}
+
+	// Calculate stale threshold
+	now := time.Now()
+	staleThreshold := now.Add(-stalePRThreshold)
+
+	currentBlockedPRs := make(map[string]bool)
+	playedIncomingSound := false
+	playedOutgoingSound := false
+
+	// Check incoming PRs for newly blocked ones
+	for i := range incoming {
+		if incoming[i].NeedsReview {
+			currentBlockedPRs[incoming[i].URL] = true
+
+			// Skip stale PRs for notifications if hideStaleIncoming is enabled
+			if hideStaleIncoming && incoming[i].UpdatedAt.Before(staleThreshold) {
+				continue
+			}
+
+			// Send notification and play sound if PR wasn't blocked before
+			if !oldBlockedPRs[incoming[i].URL] {
+				log.Printf("[NOTIFY] New blocked incoming PR: %s #%d - %s (reason: %s)",
+					incoming[i].Repository, incoming[i].Number, incoming[i].Title, incoming[i].ActionReason)
+				title := "PR Blocked on You 🪿"
+				message := fmt.Sprintf("%s #%d: %s", incoming[i].Repository, incoming[i].Number, incoming[i].Title)
+				if err := beeep.Notify(title, message, ""); err != nil {
+					log.Printf("[NOTIFY] Failed to send desktop notification for %s: %v", incoming[i].URL, err)
+				} else {
+					log.Printf("[NOTIFY] Desktop notification sent for %s", incoming[i].URL)
+				}
+				// Only play sound once per polling period
+				if !playedIncomingSound {
+					app.playSound(ctx, "honk")
+					playedIncomingSound = true
+				}
+			}
+		}
+	}
+
+	// Check outgoing PRs for newly blocked ones
+	for i := range outgoing {
+		if outgoing[i].IsBlocked {
+			currentBlockedPRs[outgoing[i].URL] = true
+
+			// Skip stale PRs for notifications if hideStaleIncoming is enabled
+			if hideStaleIncoming && outgoing[i].UpdatedAt.Before(staleThreshold) {
+				continue
+			}
+
+			// Send notification and play sound if PR wasn't blocked before
+			if !oldBlockedPRs[outgoing[i].URL] {
+				log.Printf("[NOTIFY] New blocked outgoing PR: %s #%d - %s (reason: %s)",
+					outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title, outgoing[i].ActionReason)
+				title := "Your PR is Blocked 🚀"
+				message := fmt.Sprintf("%s #%d: %s", outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
+				if err := beeep.Notify(title, message, ""); err != nil {
+					log.Printf("[NOTIFY] Failed to send desktop notification for %s: %v", outgoing[i].URL, err)
+				} else {
+					log.Printf("[NOTIFY] Desktop notification sent for %s", outgoing[i].URL)
+				}
+				// Only play sound once per polling period
+				if !playedOutgoingSound {
+					app.playSound(ctx, "rocket")
+					playedOutgoingSound = true
+				}
+			}
+		}
+	}
+
+	// Update the previous blocked PRs map
+	app.mu.Lock()
+	app.previousBlockedPRs = currentBlockedPRs
+	app.mu.Unlock()
 }

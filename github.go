@@ -119,32 +119,12 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-// fetchPRsInternal is the implementation for PR fetching.
-// It returns GitHub data immediately and starts Turn API queries in the background (when waitForTurn=false),
-// or waits for Turn data to complete (when waitForTurn=true).
-func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incoming []PR, outgoing []PR, err error) {
-	// Use targetUser if specified, otherwise use authenticated user
-	user := app.currentUser.GetLogin()
-	if app.targetUser != "" {
-		user = app.targetUser
-	}
-
-	// Single query to get all PRs involving the user
-	query := fmt.Sprintf("is:open is:pr involves:%s archived:false", user)
-
-	const perPage = 100
-	opts := &github.SearchOptions{
-		ListOptions: github.ListOptions{PerPage: perPage},
-		Sort:        "updated",
-		Order:       "desc",
-	}
-
-	log.Printf("Searching for PRs with query: %s", query)
-	searchStart := time.Now()
-
+// executeGitHubQuery executes a single GitHub search query with retry logic.
+func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *github.SearchOptions) (*github.IssuesSearchResult, error) {
 	var result *github.IssuesSearchResult
 	var resp *github.Response
-	err = retry.Do(func() error {
+
+	err := retry.Do(func() error {
 		// Create timeout context for GitHub API call
 		githubCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -194,19 +174,97 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 		retry.Context(ctx),
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("search PRs after %d retries: %w", maxRetries, err)
+		return nil, err
+	}
+	return result, nil
+}
+
+// fetchPRsInternal is the implementation for PR fetching.
+// It returns GitHub data immediately and starts Turn API queries in the background (when waitForTurn=false),
+// or waits for Turn data to complete (when waitForTurn=true).
+func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incoming []PR, outgoing []PR, err error) {
+	// Use targetUser if specified, otherwise use authenticated user
+	user := app.currentUser.GetLogin()
+	if app.targetUser != "" {
+		user = app.targetUser
 	}
 
-	log.Printf("GitHub search completed in %v, found %d PRs", time.Since(searchStart), len(result.Issues))
+	const perPage = 100
+	opts := &github.SearchOptions{
+		ListOptions: github.ListOptions{PerPage: perPage},
+		Sort:        "updated",
+		Order:       "desc",
+	}
+
+	searchStart := time.Now()
+
+	// Run both queries in parallel
+	type queryResult struct {
+		query  string
+		issues []*github.Issue
+		err    error
+	}
+
+	queryResults := make(chan queryResult, 2)
+
+	// Query 1: PRs involving the user
+	go func() {
+		query := fmt.Sprintf("is:open is:pr involves:%s archived:false", user)
+		log.Printf("[GITHUB] Searching for PRs with query: %s", query)
+
+		result, err := app.executeGitHubQuery(ctx, query, opts)
+		if err != nil {
+			queryResults <- queryResult{err: err, query: query}
+		} else {
+			queryResults <- queryResult{issues: result.Issues, query: query}
+		}
+	}()
+
+	// Query 2: PRs in user-owned repos with no reviewers
+	go func() {
+		query := fmt.Sprintf("is:open is:pr user:%s review:none archived:false", user)
+		log.Printf("[GITHUB] Searching for PRs with query: %s", query)
+
+		result, err := app.executeGitHubQuery(ctx, query, opts)
+		if err != nil {
+			queryResults <- queryResult{err: err, query: query}
+		} else {
+			queryResults <- queryResult{issues: result.Issues, query: query}
+		}
+	}()
+
+	// Collect results from both queries
+	var allIssues []*github.Issue
+	seenURLs := make(map[string]bool)
+
+	for range 2 {
+		result := <-queryResults
+		if result.err != nil {
+			log.Printf("[GITHUB] Query failed: %s - %v", result.query, result.err)
+			// Continue processing other query results even if one fails
+			continue
+		}
+		log.Printf("[GITHUB] Query completed: %s - found %d PRs", result.query, len(result.issues))
+		
+		// Deduplicate PRs based on URL
+		for _, issue := range result.issues {
+			url := issue.GetHTMLURL()
+			if !seenURLs[url] {
+				seenURLs[url] = true
+				allIssues = append(allIssues, issue)
+			}
+		}
+	}
+	log.Printf("[GITHUB] Both searches completed in %v, found %d unique PRs", time.Since(searchStart), len(allIssues))
 
 	// Limit PRs for performance
-	if len(result.Issues) > maxPRsToProcess {
-		log.Printf("Limiting to %d PRs for performance (total: %d)", maxPRsToProcess, len(result.Issues))
-		result.Issues = result.Issues[:maxPRsToProcess]
+	if len(allIssues) > maxPRsToProcess {
+		log.Printf("Limiting to %d PRs for performance (total: %d)", maxPRsToProcess, len(allIssues))
+		allIssues = allIssues[:maxPRsToProcess]
 	}
 
 	// Process GitHub results immediately
-	for _, issue := range result.Issues {
+	for _, issue := range allIssues {
 		if !issue.IsPullRequest() {
 			continue
 		}
@@ -229,26 +287,21 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 		}
 	}
 
+	// Only log summary, not individual PRs
 	log.Printf("[GITHUB] Found %d incoming, %d outgoing PRs from GitHub", len(incoming), len(outgoing))
-	for i := range incoming {
-		log.Printf("[GITHUB] Incoming PR: %s", incoming[i].URL)
-	}
-	for i := range outgoing {
-		log.Printf("[GITHUB] Outgoing PR: %s", outgoing[i].URL)
-	}
 
 	// Fetch Turn API data
 	if waitForTurn {
 		// Synchronous - wait for Turn data
-		log.Println("[TURN] Fetching Turn API data synchronously before building menu...")
-		app.fetchTurnDataSync(ctx, result.Issues, user, &incoming, &outgoing)
+		// Fetch Turn API data synchronously before building menu
+		app.fetchTurnDataSync(ctx, allIssues, user, &incoming, &outgoing)
 	} else {
 		// Asynchronous - start in background
 		app.mu.Lock()
 		app.loadingTurnData = true
 		app.pendingTurnResults = make([]TurnResult, 0) // Reset buffer
 		app.mu.Unlock()
-		go app.fetchTurnDataAsync(ctx, result.Issues, user)
+		go app.fetchTurnDataAsync(ctx, allIssues, user)
 	}
 
 	return incoming, outgoing, nil
@@ -366,7 +419,10 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			if action, exists := result.turnData.PRState.UnblockAction[user]; exists {
 				needsReview = true
 				actionReason = action.Reason
-				log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
+				// Only log fresh API calls
+				if !result.wasFromCache {
+					log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
+				}
 			}
 
 			// Update the PR in the slices directly
@@ -400,7 +456,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 // fetchTurnDataAsync fetches Turn API data in the background and updates PRs as results arrive.
 func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, user string) {
 	// Log start of Turn API queries
-	log.Print("[TURN] Starting Turn API queries in background")
+	// Start Turn API queries in background
 
 	turnStart := time.Now()
 	type prResult struct {
@@ -466,10 +522,10 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 			if action, exists := result.turnData.PRState.UnblockAction[user]; exists {
 				needsReview = true
 				actionReason = action.Reason
-				log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
-			} else if !result.wasFromCache {
-				// Only log "no action" for fresh API results, not cached ones
-				log.Printf("[TURN] No UnblockAction found for user %s on %s", user, result.url)
+				// Only log blocked PRs from fresh API calls
+				if !result.wasFromCache {
+					log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
+				}
 			}
 
 			// Buffer the Turn result instead of applying immediately
@@ -486,13 +542,9 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 			app.mu.Unlock()
 
 			updatesApplied++
-			// Reduce verbosity - only log if not from cache or if blocked
-			if !result.wasFromCache || needsReview {
-				cacheStatus := "fresh"
-				if result.wasFromCache {
-					cacheStatus = "cached"
-				}
-				log.Printf("[TURN] %s data for %s (needsReview=%v, actionReason=%q)", cacheStatus, result.url, needsReview, actionReason)
+			// Only log fresh API calls (not cached)
+			if !result.wasFromCache {
+				log.Printf("[TURN] Fresh API data for %s (needsReview=%v)", result.url, needsReview)
 			}
 		} else if result.err != nil {
 			turnFailures++
@@ -519,7 +571,10 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 		}
 	}
 
-	log.Printf("[TURN] Applying %d buffered Turn results (%d from cache, %d fresh)", len(pendingResults), cacheHits, freshResults)
+	// Only log if we have fresh results
+	if freshResults > 0 {
+		log.Printf("[TURN] Applying %d buffered Turn results (%d from cache, %d fresh)", len(pendingResults), cacheHits, freshResults)
+	}
 
 	// Track how many PRs actually changed
 	var actualChanges int
@@ -530,15 +585,15 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 		}
 	}
 
+	// Check for newly blocked PRs after Turn data is applied
+	app.checkForNewlyBlockedPRs(ctx)
+
 	// Update tray title and menu with final Turn data if menu is already initialized
 	app.setTrayTitle()
 	if app.menuInitialized {
 		// Only trigger menu update if PR data actually changed
 		if actualChanges > 0 {
-			log.Printf("[TURN] Turn data applied - %d PRs actually changed, checking if menu needs update", actualChanges)
 			app.updateMenuIfChanged(ctx)
-		} else {
-			log.Print("[TURN] Turn data applied - no PR changes detected (cached data unchanged), skipping menu update")
 		}
 	}
 }

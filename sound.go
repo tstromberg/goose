@@ -21,6 +21,9 @@ var launchSound []byte
 //go:embed media/dark-impact-232945.wav
 var impactSound []byte
 
+//go:embed media/honk.wav
+var honkSound []byte
+
 var soundCacheOnce sync.Once
 
 // initSoundCache writes embedded sounds to cache directory once.
@@ -48,6 +51,14 @@ func (app *App) initSoundCache() {
 				log.Printf("Failed to cache impact sound: %v", err)
 			}
 		}
+
+		// Write honk sound
+		honkPath := filepath.Join(soundDir, "honk.wav")
+		if _, err := os.Stat(honkPath); os.IsNotExist(err) {
+			if err := os.WriteFile(honkPath, honkSound, 0o600); err != nil {
+				log.Printf("Failed to cache honk sound: %v", err)
+			}
+		}
 	})
 }
 
@@ -61,6 +72,7 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 	allowedSounds := map[string]string{
 		"rocket":    "launch.wav",
 		"detective": "impact.wav",
+		"honk":      "honk.wav",
 	}
 
 	soundName, ok := allowedSounds[soundType]
@@ -94,6 +106,17 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 		case "darwin":
 			cmd = exec.CommandContext(soundCtx, "afplay", soundPath)
 		case "windows":
+			// Validate soundPath contains only safe characters for PowerShell
+			// Allow alphanumeric, spaces, dots, underscores, hyphens, backslashes, and colons (for drive letters)
+			for _, r := range soundPath {
+				isValid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+					(r >= '0' && r <= '9') || r == ' ' || r == '.' ||
+					r == '_' || r == '-' || r == '\\' || r == ':'
+				if !isValid {
+					log.Printf("Sound path contains invalid character for PowerShell: %q in path %s", r, soundPath)
+					return
+				}
+			}
 			// Use PowerShell's SoundPlayer with proper escaping
 			//nolint:gocritic // Need literal quotes in PowerShell script
 			script := fmt.Sprintf(`(New-Object Media.SoundPlayer "%s").PlaySync()`,
