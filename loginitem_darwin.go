@@ -113,24 +113,6 @@ func setLoginItem(ctx context.Context, enable bool) error {
 	return nil
 }
 
-// isRunningFromAppBundle checks if the app is running from a .app bundle.
-func isRunningFromAppBundle() bool {
-	execPath, err := os.Executable()
-	if err != nil {
-		return false
-	}
-
-	// Resolve any symlinks
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return false
-	}
-
-	// Check if we're running from an app bundle
-	// App bundles have the structure: /path/to/App.app/Contents/MacOS/executable
-	return strings.Contains(execPath, ".app/Contents/MacOS/")
-}
-
 // appPath returns the path to the application bundle.
 func appPath() (string, error) {
 	// Get the executable path
@@ -161,8 +143,22 @@ func appPath() (string, error) {
 
 // addLoginItemUI adds the login item menu option (macOS only).
 func addLoginItemUI(ctx context.Context, _ *App) {
-	// Only show login item menu if running from an app bundle
-	if !isRunningFromAppBundle() {
+	// Check if we're running from an app bundle
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Println("Hiding 'Start at Login' menu item - could not get executable path")
+		return
+	}
+
+	// Resolve any symlinks
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		log.Println("Hiding 'Start at Login' menu item - could not resolve symlinks")
+		return
+	}
+
+	// App bundles have the structure: /path/to/App.app/Contents/MacOS/executable
+	if !strings.Contains(execPath, ".app/Contents/MacOS/") {
 		log.Println("Hiding 'Start at Login' menu item - not running from app bundle")
 		return
 	}

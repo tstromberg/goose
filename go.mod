@@ -1,4 +1,4 @@
-module ready-to-review
+module github.com/ready-to-review/pr-menubar
 
 go 1.23.4
 
@@ -6,6 +6,7 @@ require (
 	github.com/codeGROOVE-dev/retry v1.2.0
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
+	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v57 v57.0.0
 	github.com/ready-to-review/turnclient v0.0.0-20250718014946-bb5bb107649f
 	golang.org/x/oauth2 v0.30.0
@@ -16,7 +17,6 @@ require (
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/jackmordaunt/icns/v3 v3.0.1 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect

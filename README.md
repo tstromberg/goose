@@ -16,17 +16,18 @@ git clone https://github.com/ready-to-review/pr-menubar.git
 cd pr-menubar && make run
 ```
 
-The app appears in your menubar showing: `incoming / outgoing` PRs
+The app appears in your menubar showing: 🪿 (incoming blocked on you) or 🎉 (outgoing blocked)
 
 ## Features
 
-- **Smart Notifications**: Only alerts when YOU are the blocker (not just assigned)
-- **Sound Effects**: Audio cues for important PR events 🔊
+- **Smart Notifications**: Desktop alerts + sounds when PRs become blocked (🪿 honk for incoming, 🚀 rocket for outgoing)
+- **Comprehensive Coverage**: Tracks PRs you're involved in + PRs in your repos needing reviewers
 - **Detailed Tooltips**: Hover to see why you're blocking and what's needed
 - **Test-Aware**: Waits for CI to pass before notifying
 - **Zero Noise**: No pings for PRs that aren't actually blocked on you
 - **One-Click Access**: Open any PR instantly from the menubar
 - **Multi-User Support**: Track PRs for different GitHub accounts with `--user`
+- **Auto-Start**: macOS "Start at Login" option (when running from /Applications)
 
 ## Installation
 
@@ -36,7 +37,7 @@ make install      # Traditional install for your OS
 make build        # Build only
 ```
 
-**Requirements**: GitHub CLI (`gh`) authenticated, Go 1.21+ (for building)
+**Requirements**: GitHub CLI (`gh`) authenticated, Go 1.23+ (for building)
 
 ## Privacy
 
