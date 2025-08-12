@@ -16,23 +16,6 @@ import (
 )
 
 // formatAge formats a duration in human-readable form.
-func formatAge(updatedAt time.Time) string {
-	duration := time.Since(updatedAt)
-
-	switch {
-	case duration < time.Hour:
-		return fmt.Sprintf("%dm", int(duration.Minutes()))
-	case duration < 24*time.Hour:
-		return fmt.Sprintf("%dh", int(duration.Hours()))
-	case duration < 30*24*time.Hour:
-		return fmt.Sprintf("%dd", int(duration.Hours()/24))
-	case duration < 365*24*time.Hour:
-		return fmt.Sprintf("%dmo", int(duration.Hours()/(24*30)))
-	default:
-		return updatedAt.Format("2006")
-	}
-}
-
 // openURL safely opens a URL in the default browser after validation.
 func openURL(ctx context.Context, rawURL string) error {
 	// Parse and validate the URL
@@ -193,9 +176,8 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	// Add PR items in sorted order
 	for i := range sortedPRs {
 		// Apply filters
-		// Skip stale PRs if configured (older than 90 days)
-		const stalePRDays = 90
-		if app.hideStaleIncoming && sortedPRs[i].UpdatedAt.Before(time.Now().Add(-stalePRDays*24*time.Hour)) {
+		// Skip stale PRs if configured
+		if app.hideStaleIncoming && sortedPRs[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
 			continue
 		}
 
@@ -204,7 +186,22 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		if sortedPRs[i].NeedsReview {
 			title = fmt.Sprintf("• %s", title)
 		}
-		tooltip := fmt.Sprintf("%s (%s)", sortedPRs[i].Title, formatAge(sortedPRs[i].UpdatedAt))
+		// Format age inline for tooltip
+		duration := time.Since(sortedPRs[i].UpdatedAt)
+		var age string
+		switch {
+		case duration < time.Hour:
+			age = fmt.Sprintf("%dm", int(duration.Minutes()))
+		case duration < dailyInterval:
+			age = fmt.Sprintf("%dh", int(duration.Hours()))
+		case duration < 30*dailyInterval:
+			age = fmt.Sprintf("%dd", int(duration.Hours()/24))
+		case duration < 365*dailyInterval:
+			age = fmt.Sprintf("%dmo", int(duration.Hours()/(24*30)))
+		default:
+			age = sortedPRs[i].UpdatedAt.Format("2006")
+		}
+		tooltip := fmt.Sprintf("%s (%s)", sortedPRs[i].Title, age)
 		// Add action reason for blocked PRs
 		if (sortedPRs[i].NeedsReview || sortedPRs[i].IsBlocked) && sortedPRs[i].ActionReason != "" {
 			tooltip = fmt.Sprintf("%s - %s", tooltip, sortedPRs[i].ActionReason)

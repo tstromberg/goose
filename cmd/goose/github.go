@@ -24,17 +24,6 @@ import (
 // githubTokenRegex matches valid GitHub token formats.
 var githubTokenRegex = regexp.MustCompile(`^(ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})$`)
 
-// validateGitHubToken validates a GitHub token format.
-func validateGitHubToken(token string) error {
-	if token == "" {
-		return errors.New("empty token")
-	}
-	if !githubTokenRegex.MatchString(token) {
-		return errors.New("invalid GitHub token format")
-	}
-	return nil
-}
-
 // initClients initializes GitHub and Turn API clients.
 func (app *App) initClients(ctx context.Context) error {
 	token, err := app.token(ctx)
@@ -64,8 +53,12 @@ func (*App) token(ctx context.Context) (string, error) {
 	// Check GITHUB_TOKEN environment variable first
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		token = strings.TrimSpace(token)
-		if err := validateGitHubToken(token); err != nil {
-			return "", fmt.Errorf("invalid GITHUB_TOKEN: %w", err)
+		// Validate token format inline
+		if token == "" {
+			return "", errors.New("GITHUB_TOKEN is empty")
+		}
+		if !githubTokenRegex.MatchString(token) {
+			return "", errors.New("GITHUB_TOKEN has invalid format")
 		}
 		log.Println("Using GitHub token from GITHUB_TOKEN environment variable")
 		return token, nil

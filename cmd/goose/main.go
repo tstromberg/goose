@@ -37,7 +37,8 @@ const (
 	cacheCleanupInterval = 5 * 24 * time.Hour
 
 	// PR settings.
-	stalePRThreshold = 90 * 24 * time.Hour
+	dailyInterval    = 24 * time.Hour
+	stalePRThreshold = 90 * dailyInterval
 	maxPRsToProcess  = 200 // Limit for performance
 
 	// Update interval settings.
@@ -535,35 +536,6 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	app.checkForNewlyBlockedPRs(ctx)
 }
 
-// shouldNotifyForPR determines if we should send a notification for a PR.
-func shouldNotifyForPR(
-	_ string,
-	isBlocked bool,
-	prevState NotificationState,
-	hasHistory bool,
-	reminderInterval time.Duration,
-	enableReminders bool,
-) (shouldNotify bool, reason string) {
-	if !hasHistory && isBlocked {
-		return true, "newly blocked"
-	}
-
-	if !hasHistory {
-		return false, ""
-	}
-
-	switch {
-	case isBlocked && !prevState.WasBlocked:
-		return true, "became blocked"
-	case !isBlocked && prevState.WasBlocked:
-		return false, "unblocked"
-	case isBlocked && prevState.WasBlocked && enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
-		return true, "reminder"
-	default:
-		return false, ""
-	}
-}
-
 // processPRNotifications handles notification logic for a single PR.
 func (app *App) processPRNotifications(
 	ctx context.Context,
@@ -576,7 +548,30 @@ func (app *App) processPRNotifications(
 	reminderInterval time.Duration,
 ) {
 	prevState, hasHistory := notificationHistory[pr.URL]
-	shouldNotify, notifyReason := shouldNotifyForPR(pr.URL, isBlocked, prevState, hasHistory, reminderInterval, app.enableReminders)
+
+	// Inline notification decision logic
+	var shouldNotify bool
+	var notifyReason string
+	switch {
+	case !hasHistory && isBlocked:
+		shouldNotify = true
+		notifyReason = "newly blocked"
+	case !hasHistory:
+		shouldNotify = false
+		notifyReason = ""
+	case isBlocked && !prevState.WasBlocked:
+		shouldNotify = true
+		notifyReason = "became blocked"
+	case !isBlocked && prevState.WasBlocked:
+		shouldNotify = false
+		notifyReason = "unblocked"
+	case isBlocked && prevState.WasBlocked && app.enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
+		shouldNotify = true
+		notifyReason = "reminder"
+	default:
+		shouldNotify = false
+		notifyReason = ""
+	}
 
 	// Update state for unblocked PRs
 	if notifyReason == "unblocked" {
