@@ -24,6 +24,8 @@ You can also visit the web-based equivalent at https://dash.ready-to-review.dev/
 
 ## macOS Quick Start ⚡ (How to Get Honked At)
 
+### Option 1: Using GitHub CLI (Default)
+
 Install dependencies: the [GitHub CLI, aka "gh"](https://cli.github.com/) and [Go](https://go.dev/):
 
 ```bash
@@ -37,6 +39,21 @@ Then summon the goose:
 git clone https://github.com/ready-to-review/goose.git
 cd goose && make run
 ```
+
+### Option 2: Using a GitHub Token (More Control)
+
+If you want more control over which repositories the goose can access, you can use a GitHub personal access token instead:
+
+1. Create a [GitHub personal access token](https://github.com/settings/tokens) with `repo` scope
+2. Set the `GITHUB_TOKEN` environment variable:
+
+```bash
+export GITHUB_TOKEN=your_token_here
+git clone https://github.com/ready-to-review/goose.git
+cd goose && make run
+```
+
+When `GITHUB_TOKEN` is set, the goose will use it directly instead of the GitHub CLI, giving you precise control over repository access.
 
 ## Known Issues
 

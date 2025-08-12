@@ -44,8 +44,19 @@ func (app *App) initClients(ctx context.Context) error {
 	return nil
 }
 
-// githubToken retrieves the GitHub token using gh CLI.
+// githubToken retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI.
 func (*App) githubToken(ctx context.Context) (string, error) {
+	// First check for GITHUB_TOKEN environment variable
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		token = strings.TrimSpace(token)
+		if err := validateGitHubToken(token); err != nil {
+			return "", fmt.Errorf("invalid GITHUB_TOKEN: %w", err)
+		}
+		log.Println("Using GitHub token from GITHUB_TOKEN environment variable")
+		return token, nil
+	}
+
+	// Fall back to gh CLI if GITHUB_TOKEN is not set
 	// Only check absolute paths for security - never use PATH
 	var trustedPaths []string
 	switch runtime.GOOS {
@@ -85,8 +96,11 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 			const executableMask = 0o111
 			if info.Mode().IsRegular() && info.Mode()&executableMask != 0 {
 				// Verify it's actually the gh binary by running version command
-				cmd := exec.Command(path, "version") //nolint:noctx // Quick version check doesn't need context
+				// Use timeout to prevent hanging
+				versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				cmd := exec.CommandContext(versionCtx, path, "version")
 				output, err := cmd.Output()
+				cancel() // Call cancel immediately after command execution
 				if err == nil && strings.Contains(string(output), "gh version") {
 					log.Printf("Found and verified gh at: %s", path)
 					ghPath = path
@@ -97,25 +111,21 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 	}
 
 	if ghPath == "" {
-		return "", errors.New("gh cli not found in trusted locations")
+		return "", errors.New("gh cli not found in trusted locations and GITHUB_TOKEN not set")
 	}
 
 	log.Printf("Executing command: %s auth token", ghPath)
 	cmd := exec.CommandContext(ctx, ghPath, "auth", "token")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("gh command failed with output: %s", string(output))
-		return "", fmt.Errorf("exec 'gh auth token': %w (output: %s)", err, string(output))
+		log.Printf("gh command failed: %v", err)
+		return "", fmt.Errorf("exec 'gh auth token': %w", err)
 	}
 	token := strings.TrimSpace(string(output))
-	if token == "" {
-		return "", errors.New("empty github token")
+	if err := validateGitHubToken(token); err != nil {
+		return "", fmt.Errorf("invalid token from gh CLI: %w", err)
 	}
-	const minTokenLength = 20
-	if len(token) < minTokenLength {
-		return "", fmt.Errorf("invalid github token length: %d", len(token))
-	}
-	log.Println("Successfully obtained GitHub token")
+	log.Println("Successfully obtained GitHub token from gh CLI")
 	return token, nil
 }
 
@@ -200,9 +210,9 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 
 	// Run both queries in parallel
 	type queryResult struct {
+		err    error
 		query  string
 		issues []*github.Issue
-		err    error
 	}
 
 	queryResults := make(chan queryResult, 2)
@@ -236,11 +246,13 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 	// Collect results from both queries
 	var allIssues []*github.Issue
 	seenURLs := make(map[string]bool)
+	var queryErrors []error
 
 	for range 2 {
 		result := <-queryResults
 		if result.err != nil {
 			log.Printf("[GITHUB] Query failed: %s - %v", result.query, result.err)
+			queryErrors = append(queryErrors, result.err)
 			// Continue processing other query results even if one fails
 			continue
 		}
@@ -256,6 +268,11 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 		}
 	}
 	log.Printf("[GITHUB] Both searches completed in %v, found %d unique PRs", time.Since(searchStart), len(allIssues))
+
+	// If both queries failed, return an error
+	if len(queryErrors) == 2 {
+		return nil, nil, fmt.Errorf("all GitHub queries failed: %v", queryErrors)
+	}
 
 	// Limit PRs for performance
 	if len(allIssues) > maxPRsToProcess {

@@ -130,6 +130,13 @@ func main() {
 	flag.DurationVar(&updateInterval, "interval", defaultUpdateInterval, "Update interval (e.g. 30s, 1m, 5m)")
 	flag.Parse()
 
+	// Validate target user if provided
+	if targetUser != "" {
+		if err := validateGitHubUsername(targetUser); err != nil {
+			log.Fatalf("Invalid target user: %v", err)
+		}
+	}
+
 	// Validate update interval
 	if updateInterval < minUpdateInterval {
 		log.Printf("Update interval %v too short, using minimum of %v", updateInterval, minUpdateInterval)
@@ -197,9 +204,9 @@ func main() {
 	}
 	app.currentUser = user
 
-	// Log if we're using a different target user
+	// Log if we're using a different target user (sanitized)
 	if app.targetUser != "" && app.targetUser != user.GetLogin() {
-		log.Printf("Querying PRs for user '%s' instead of authenticated user '%s'", app.targetUser, user.GetLogin())
+		log.Printf("Querying PRs for user '%s' instead of authenticated user", sanitizeForLog(app.targetUser))
 	}
 
 	log.Println("Starting systray...")
