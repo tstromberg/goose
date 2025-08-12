@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,9 +21,23 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// githubTokenRegex matches valid GitHub token formats.
+var githubTokenRegex = regexp.MustCompile(`^(ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})$`)
+
+// validateGitHubToken validates a GitHub token format.
+func validateGitHubToken(token string) error {
+	if token == "" {
+		return errors.New("empty token")
+	}
+	if !githubTokenRegex.MatchString(token) {
+		return errors.New("invalid GitHub token format")
+	}
+	return nil
+}
+
 // initClients initializes GitHub and Turn API clients.
 func (app *App) initClients(ctx context.Context) error {
-	token, err := app.githubToken(ctx)
+	token, err := app.token(ctx)
 	if err != nil {
 		return fmt.Errorf("get github token: %w", err)
 	}
@@ -44,8 +59,18 @@ func (app *App) initClients(ctx context.Context) error {
 	return nil
 }
 
-// githubToken retrieves the GitHub token using gh CLI.
-func (*App) githubToken(ctx context.Context) (string, error) {
+// token retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI.
+func (*App) token(ctx context.Context) (string, error) {
+	// Check GITHUB_TOKEN environment variable first
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		token = strings.TrimSpace(token)
+		if err := validateGitHubToken(token); err != nil {
+			return "", fmt.Errorf("invalid GITHUB_TOKEN: %w", err)
+		}
+		log.Println("Using GitHub token from GITHUB_TOKEN environment variable")
+		return token, nil
+	}
+
 	// Only check absolute paths for security - never use PATH
 	var trustedPaths []string
 	switch runtime.GOOS {
@@ -179,10 +204,19 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 	return result, nil
 }
 
+// prResult holds the result of a Turn API query for a PR.
+type prResult struct {
+	err          error
+	turnData     *turn.CheckResponse
+	url          string
+	isOwner      bool
+	wasFromCache bool
+}
+
 // fetchPRsInternal is the implementation for PR fetching.
 // It returns GitHub data immediately and starts Turn API queries in the background (when waitForTurn=false),
 // or waits for Turn data to complete (when waitForTurn=true).
-func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incoming []PR, outgoing []PR, err error) {
+func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incoming []PR, outgoing []PR, _ error) {
 	// Use targetUser if specified, otherwise use authenticated user
 	user := app.currentUser.GetLogin()
 	if app.targetUser != "" {
@@ -200,9 +234,9 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 
 	// Run both queries in parallel
 	type queryResult struct {
+		err    error
 		query  string
 		issues []*github.Issue
-		err    error
 	}
 
 	queryResults := make(chan queryResult, 2)
@@ -236,11 +270,13 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 	// Collect results from both queries
 	var allIssues []*github.Issue
 	seenURLs := make(map[string]bool)
+	var queryErrors []error
 
 	for range 2 {
 		result := <-queryResults
 		if result.err != nil {
 			log.Printf("[GITHUB] Query failed: %s - %v", result.query, result.err)
+			queryErrors = append(queryErrors, result.err)
 			// Continue processing other query results even if one fails
 			continue
 		}
@@ -256,6 +292,11 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 		}
 	}
 	log.Printf("[GITHUB] Both searches completed in %v, found %d unique PRs", time.Since(searchStart), len(allIssues))
+
+	// If both queries failed, return an error
+	if len(queryErrors) == 2 {
+		return nil, nil, fmt.Errorf("all GitHub queries failed: %v", queryErrors)
+	}
 
 	// Limit PRs for performance
 	if len(allIssues) > maxPRsToProcess {
@@ -359,13 +400,6 @@ func (app *App) updatePRData(url string, needsReview bool, isOwner bool, actionR
 // fetchTurnDataSync fetches Turn API data synchronously and updates PRs directly.
 func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, user string, incoming *[]PR, outgoing *[]PR) {
 	turnStart := time.Now()
-	type prResult struct {
-		err          error
-		turnData     *turn.CheckResponse
-		url          string
-		isOwner      bool
-		wasFromCache bool
-	}
 
 	// Create a channel for results
 	results := make(chan prResult, len(issues))
@@ -455,17 +489,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 
 // fetchTurnDataAsync fetches Turn API data in the background and updates PRs as results arrive.
 func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, user string) {
-	// Log start of Turn API queries
-	// Start Turn API queries in background
-
 	turnStart := time.Now()
-	type prResult struct {
-		err          error
-		turnData     *turn.CheckResponse
-		url          string
-		isOwner      bool
-		wasFromCache bool
-	}
 
 	// Create a channel for results
 	results := make(chan prResult, len(issues))

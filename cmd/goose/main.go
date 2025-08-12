@@ -378,22 +378,23 @@ func (app *App) updatePRs(ctx context.Context) {
 // buildCurrentMenuState creates a MenuState representing the current menu items.
 func (app *App) buildCurrentMenuState() *MenuState {
 	// Apply the same filtering as the menu display (stale PR filtering)
-	var filteredIncoming, filteredOutgoing []PR
+	staleThreshold := time.Now().Add(-stalePRThreshold)
 
-	now := time.Now()
-	staleThreshold := now.Add(-stalePRThreshold)
-
-	for i := range app.incoming {
-		if !app.hideStaleIncoming || app.incoming[i].UpdatedAt.After(staleThreshold) {
-			filteredIncoming = append(filteredIncoming, app.incoming[i])
+	filterStale := func(prs []PR) []PR {
+		if !app.hideStaleIncoming {
+			return prs
 		}
+		var filtered []PR
+		for i := range prs {
+			if prs[i].UpdatedAt.After(staleThreshold) {
+				filtered = append(filtered, prs[i])
+			}
+		}
+		return filtered
 	}
 
-	for i := range app.outgoing {
-		if !app.hideStaleIncoming || app.outgoing[i].UpdatedAt.After(staleThreshold) {
-			filteredOutgoing = append(filteredOutgoing, app.outgoing[i])
-		}
-	}
+	filteredIncoming := filterStale(app.incoming)
+	filteredOutgoing := filterStale(app.outgoing)
 
 	// Sort PRs the same way the menu does
 	incomingSorted := sortPRsBlockedFirst(filteredIncoming)

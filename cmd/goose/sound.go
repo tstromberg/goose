@@ -15,13 +15,10 @@ import (
 	"time"
 )
 
-//go:embed media/launch-85216.wav
-var launchSound []byte
+//go:embed sounds/tada.wav
+var tadaSound []byte
 
-//go:embed media/dark-impact-232945.wav
-var impactSound []byte
-
-//go:embed media/honk.wav
+//go:embed sounds/honk.wav
 var honkSound []byte
 
 var soundCacheOnce sync.Once
@@ -36,19 +33,11 @@ func (app *App) initSoundCache() {
 			return
 		}
 
-		// Write launch sound
-		launchPath := filepath.Join(soundDir, "launch.wav")
-		if _, err := os.Stat(launchPath); os.IsNotExist(err) {
-			if err := os.WriteFile(launchPath, launchSound, 0o600); err != nil {
-				log.Printf("Failed to cache launch sound: %v", err)
-			}
-		}
-
-		// Write impact sound
-		impactPath := filepath.Join(soundDir, "impact.wav")
-		if _, err := os.Stat(impactPath); os.IsNotExist(err) {
-			if err := os.WriteFile(impactPath, impactSound, 0o600); err != nil {
-				log.Printf("Failed to cache impact sound: %v", err)
+		// Write tada sound
+		tadaPath := filepath.Join(soundDir, "tada.wav")
+		if _, err := os.Stat(tadaPath); os.IsNotExist(err) {
+			if err := os.WriteFile(tadaPath, tadaSound, 0o600); err != nil {
+				log.Printf("Failed to cache tada sound: %v", err)
 			}
 		}
 
@@ -70,9 +59,8 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 
 	// Select the sound file with validation to prevent path traversal
 	allowedSounds := map[string]string{
-		"rocket":    "launch.wav",
-		"detective": "impact.wav",
-		"honk":      "honk.wav",
+		"rocket": "tada.wav",
+		"honk":   "honk.wav",
 	}
 
 	soundName, ok := allowedSounds[soundType]
