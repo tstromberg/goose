@@ -44,8 +44,6 @@ cd goose && make run
 
 If you want more control over which repositories the goose can access, you can use a GitHub personal access token instead:
 
-#### Recommended: Fine-grained Personal Access Token
-
 For maximum security, use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new):
 
 1. Go to GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens
@@ -56,8 +54,6 @@ For maximum security, use a [fine-grained personal access token](https://github.
      - Pull requests: Read
      - Metadata: Read
 3. Copy the token (starts with `github_pat_`)
-
-#### Alternative: Classic Personal Access Token
 
 If you need broader access, you can use a [classic token](https://github.com/settings/tokens):
 - Create with `repo` scope (grants full repository access - use with caution)
@@ -87,10 +83,12 @@ This tool is part of the [CodeGroove](https://codegroove.dev) developer accelera
 
 ## Privacy
 
-Your GitHub token used to fetch PR metadata but we never store it anywhere. GitHub data is retained strictly for caching purposes with a 20-day maximum TTL.
+- Your GitHub token is used to fetch PR metadata, but is never stored or logged.
+- We won't sell your information or use it for any purpose other than caching.
+- GitHub metadata for open pull requests may be cached for up to 20 days for performance reasons.
 
 ---
 
-Built with ❤️ and mild sleep deprivation by [CodeGroove](https://codegroove.dev/products/)
+Built with ❤️ by [CodeGroove](https://codegroove.dev/products/)
 
 [Contribute](https://github.com/ready-to-review/goose) (PRs welcome, but the goose will judge you)
