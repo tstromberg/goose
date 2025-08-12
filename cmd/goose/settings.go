@@ -15,9 +15,28 @@ type Settings struct {
 	HideStale       bool `json:"hide_stale"`
 }
 
+// getSettingsDir returns the configuration directory for settings.
+func getSettingsDir() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(configDir, "ready-to-review"), nil
+}
+
 // loadSettings loads settings from disk or returns defaults.
 func (app *App) loadSettings() {
-	settingsPath := filepath.Join(app.cacheDir, "settings.json")
+	settingsDir, err := getSettingsDir()
+	if err != nil {
+		log.Printf("Failed to get settings directory: %v", err)
+		// Use defaults
+		app.enableAudioCues = true
+		app.enableReminders = true
+		app.hideStaleIncoming = true
+		return
+	}
+
+	settingsPath := filepath.Join(settingsDir, "settings.json")
 
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
@@ -50,6 +69,12 @@ func (app *App) loadSettings() {
 
 // saveSettings saves current settings to disk.
 func (app *App) saveSettings() {
+	settingsDir, err := getSettingsDir()
+	if err != nil {
+		log.Printf("Failed to get settings directory: %v", err)
+		return
+	}
+
 	app.mu.RLock()
 	settings := Settings{
 		EnableAudioCues: app.enableAudioCues,
@@ -58,7 +83,13 @@ func (app *App) saveSettings() {
 	}
 	app.mu.RUnlock()
 
-	settingsPath := filepath.Join(app.cacheDir, "settings.json")
+	// Ensure directory exists
+	if err := os.MkdirAll(settingsDir, 0o700); err != nil {
+		log.Printf("Failed to create settings directory: %v", err)
+		return
+	}
+
+	settingsPath := filepath.Join(settingsDir, "settings.json")
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
