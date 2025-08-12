@@ -22,7 +22,7 @@ import (
 
 // initClients initializes GitHub and Turn API clients.
 func (app *App) initClients(ctx context.Context) error {
-	token, err := app.githubToken(ctx)
+	token, err := app.token(ctx)
 	if err != nil {
 		return fmt.Errorf("get github token: %w", err)
 	}
@@ -44,8 +44,8 @@ func (app *App) initClients(ctx context.Context) error {
 	return nil
 }
 
-// githubToken retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI.
-func (*App) githubToken(ctx context.Context) (string, error) {
+// token retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI.
+func (*App) token(ctx context.Context) (string, error) {
 	// First check for GITHUB_TOKEN environment variable
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		token = strings.TrimSpace(token)
@@ -390,7 +390,10 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 	// Use a WaitGroup to track goroutines
 	var wg sync.WaitGroup
 
-	// Process PRs in parallel
+	// Create semaphore to limit concurrent Turn API calls
+	sem := make(chan struct{}, maxConcurrentTurnAPICalls)
+
+	// Process PRs in parallel with concurrency limit
 	for _, issue := range issues {
 		if !issue.IsPullRequest() {
 			continue
@@ -399,6 +402,10 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 		wg.Add(1)
 		go func(issue *github.Issue) {
 			defer wg.Done()
+
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			url := issue.GetHTMLURL()
 			updatedAt := issue.GetUpdatedAt().Time
@@ -490,7 +497,10 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 	// Use a WaitGroup to track goroutines
 	var wg sync.WaitGroup
 
-	// Process PRs in parallel
+	// Create semaphore to limit concurrent Turn API calls
+	sem := make(chan struct{}, maxConcurrentTurnAPICalls)
+
+	// Process PRs in parallel with concurrency limit
 	for _, issue := range issues {
 		if !issue.IsPullRequest() {
 			continue
@@ -499,6 +509,10 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 		wg.Add(1)
 		go func(issue *github.Issue) {
 			defer wg.Done()
+
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			url := issue.GetHTMLURL()
 			updatedAt := issue.GetUpdatedAt().Time

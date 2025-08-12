@@ -44,8 +44,25 @@ cd goose && make run
 
 If you want more control over which repositories the goose can access, you can use a GitHub personal access token instead:
 
-1. Create a [GitHub personal access token](https://github.com/settings/tokens) with `repo` scope
-2. Set the `GITHUB_TOKEN` environment variable:
+#### Recommended: Fine-grained Personal Access Token
+
+For maximum security, use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new):
+
+1. Go to GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens
+2. Create a new token with:
+   - **Expiration**: Set a short expiration (30-90 days recommended)
+   - **Repository access**: Select only the specific repositories you want to monitor
+   - **Permissions**:
+     - Pull requests: Read
+     - Metadata: Read
+3. Copy the token (starts with `github_pat_`)
+
+#### Alternative: Classic Personal Access Token
+
+If you need broader access, you can use a [classic token](https://github.com/settings/tokens):
+- Create with `repo` scope (grants full repository access - use with caution)
+
+#### Using the Token
 
 ```bash
 export GITHUB_TOKEN=your_token_here
@@ -53,7 +70,7 @@ git clone https://github.com/ready-to-review/goose.git
 cd goose && make run
 ```
 
-When `GITHUB_TOKEN` is set, the goose will use it directly instead of the GitHub CLI, giving you precise control over repository access.
+When `GITHUB_TOKEN` is set, the goose will use it directly instead of the GitHub CLI, giving you precise control over repository access. Fine-grained tokens are strongly recommended for better security.
 
 ## Known Issues
 
