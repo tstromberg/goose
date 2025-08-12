@@ -708,6 +708,28 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 			continue
 		}
 
+		// If we already played the incoming sound (goose/honk), wait 2 seconds before playing outgoing sound (tada)
+		if playedIncomingSound && !playedOutgoingSound {
+			// Check if this PR would trigger a sound
+			prevState, hasHistory := notificationHistory[pr.URL]
+			var wouldPlaySound bool
+			switch {
+			case !hasHistory && isBlocked:
+				wouldPlaySound = true
+			case hasHistory && isBlocked && !prevState.WasBlocked:
+				wouldPlaySound = true
+			case hasHistory && isBlocked && prevState.WasBlocked && app.enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
+				wouldPlaySound = true
+			default:
+				wouldPlaySound = false
+			}
+
+			if wouldPlaySound {
+				log.Println("[SOUND] Delaying 2 seconds between goose and tada sounds")
+				time.Sleep(2 * time.Second)
+			}
+		}
+
 		app.processPRNotifications(ctx, pr, isBlocked, false, notificationHistory,
 			&playedOutgoingSound, now, reminderInterval)
 	}
