@@ -53,10 +53,10 @@ This tool is part of the [CodeGroove](https://codegroove.dev) developer accelera
 
 ## Privacy
 
-Your GitHub token used to fetch PR metadata but we never store it anywhere. GitHub data is retained strictly for caching purposes with a 20-day maximum TTL.
+Your GitHub token is used to fetch PR metadata, but is never stored or logged. GitHub metadata for open pull requests may be cached for up to 20 days for performance reasons. We won't sell your information or use it for any purpose other than caching.
 
 ---
 
-Built with ❤️ and mild sleep deprivation by [CodeGroove](https://codegroove.dev/products/)
+Built with ❤️ by [CodeGroove](https://codegroove.dev/products/)
 
 [Contribute](https://github.com/ready-to-review/goose) (PRs welcome, but the goose will judge you)
