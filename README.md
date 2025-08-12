@@ -40,8 +40,8 @@ cd goose && make run
 
 ## Known Issues
 
-- Blocking logic is a WIP (we're working on it)
-- Linux/BSD/Windows support is theoretical at best
+- Blocking logic isn't 100% accurate (we're working on it)
+- Linux/BSD/Windows support likely works, but remains untested
 - The goose may not stop honking until you review your PRs
 
 ## Pricing
