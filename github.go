@@ -49,9 +49,8 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 	// First check for GITHUB_TOKEN environment variable
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
 		token = strings.TrimSpace(token)
-		const minTokenLength = 20
-		if len(token) < minTokenLength {
-			return "", fmt.Errorf("invalid GITHUB_TOKEN length: %d", len(token))
+		if err := validateGitHubToken(token); err != nil {
+			return "", fmt.Errorf("invalid GITHUB_TOKEN: %w", err)
 		}
 		log.Println("Using GitHub token from GITHUB_TOKEN environment variable")
 		return token, nil
@@ -97,8 +96,11 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 			const executableMask = 0o111
 			if info.Mode().IsRegular() && info.Mode()&executableMask != 0 {
 				// Verify it's actually the gh binary by running version command
-				cmd := exec.Command(path, "version") //nolint:noctx // Quick version check doesn't need context
+				// Use timeout to prevent hanging
+				versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				cmd := exec.CommandContext(versionCtx, path, "version")
 				output, err := cmd.Output()
+				cancel() // Call cancel immediately after command execution
 				if err == nil && strings.Contains(string(output), "gh version") {
 					log.Printf("Found and verified gh at: %s", path)
 					ghPath = path
@@ -116,16 +118,12 @@ func (*App) githubToken(ctx context.Context) (string, error) {
 	cmd := exec.CommandContext(ctx, ghPath, "auth", "token")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("gh command failed with output: %s", string(output))
-		return "", fmt.Errorf("exec 'gh auth token': %w (output: %s)", err, string(output))
+		log.Printf("gh command failed: %v", err)
+		return "", fmt.Errorf("exec 'gh auth token': %w", err)
 	}
 	token := strings.TrimSpace(string(output))
-	if token == "" {
-		return "", errors.New("empty github token")
-	}
-	const minTokenLength = 20
-	if len(token) < minTokenLength {
-		return "", fmt.Errorf("invalid github token length: %d", len(token))
+	if err := validateGitHubToken(token); err != nil {
+		return "", fmt.Errorf("invalid token from gh CLI: %w", err)
 	}
 	log.Println("Successfully obtained GitHub token from gh CLI")
 	return token, nil

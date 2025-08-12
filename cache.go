@@ -25,6 +25,11 @@ type cacheEntry struct {
 
 // turnData fetches Turn API data with caching.
 func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, bool, error) {
+	// Validate URL before processing
+	if err := validateURL(url); err != nil {
+		return nil, false, fmt.Errorf("invalid URL: %w", err)
+	}
+
 	// Create cache key from URL and updated timestamp
 	key := fmt.Sprintf("%s-%s", url, updatedAt.Format(time.RFC3339))
 	hash := sha256.Sum256([]byte(key))
@@ -93,11 +98,11 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
 			log.Printf("Failed to marshal cache data for %s: %v", url, marshalErr)
 		} else {
-			// Ensure cache directory exists
+			// Ensure cache directory exists with secure permissions
 			if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
 				log.Printf("Failed to create cache directory: %v", dirErr)
 			} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
-				log.Printf("Failed to write cache file for %s: %v", url, writeErr)
+				log.Printf("Failed to write cache file: %v", writeErr)
 			}
 		}
 	}
