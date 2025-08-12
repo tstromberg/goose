@@ -24,6 +24,8 @@ You can also visit the web-based equivalent at https://dash.ready-to-review.dev/
 
 ## macOS Quick Start ⚡ (How to Get Honked At)
 
+### Option 1: Using GitHub CLI (Default)
+
 Install dependencies: the [GitHub CLI, aka "gh"](https://cli.github.com/) and [Go](https://go.dev/):
 
 ```bash
@@ -37,6 +39,34 @@ Then summon the goose:
 git clone https://github.com/ready-to-review/goose.git
 cd goose && make run
 ```
+
+### Option 2: Using a GitHub Token (More Control)
+
+If you want more control over which repositories the goose can access, you can use a GitHub personal access token instead:
+
+For maximum security, use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new):
+
+1. Go to GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens
+2. Create a new token with:
+   - **Expiration**: Set a short expiration (30-90 days recommended)
+   - **Repository access**: Select only the specific repositories you want to monitor
+   - **Permissions**:
+     - Pull requests: Read
+     - Metadata: Read
+3. Copy the token (starts with `github_pat_`)
+
+If you need broader access, you can use a [classic token](https://github.com/settings/tokens):
+- Create with `repo` scope (grants full repository access - use with caution)
+
+#### Using the Token
+
+```bash
+export GITHUB_TOKEN=your_token_here
+git clone https://github.com/ready-to-review/goose.git
+cd goose && make run
+```
+
+When `GITHUB_TOKEN` is set, the goose will use it directly instead of the GitHub CLI, giving you precise control over repository access. Fine-grained tokens are strongly recommended for better security.
 
 ## Known Issues
 
@@ -53,10 +83,12 @@ This tool is part of the [CodeGroove](https://codegroove.dev) developer accelera
 
 ## Privacy
 
-Your GitHub token used to fetch PR metadata but we never store it anywhere. GitHub data is retained strictly for caching purposes with a 20-day maximum TTL.
+- Your GitHub token is used to fetch PR metadata, but is never stored or logged.
+- We won't sell your information or use it for any purpose other than caching.
+- GitHub metadata for open pull requests may be cached for up to 20 days for performance reasons.
 
 ---
 
-Built with ❤️ and mild sleep deprivation by [CodeGroove](https://codegroove.dev/products/)
+Built with ❤️ by [CodeGroove](https://codegroove.dev/products/)
 
 [Contribute](https://github.com/ready-to-review/goose) (PRs welcome, but the goose will judge you)

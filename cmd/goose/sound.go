@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -94,22 +93,9 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 		case "darwin":
 			cmd = exec.CommandContext(soundCtx, "afplay", soundPath)
 		case "windows":
-			// Validate soundPath contains only safe characters for PowerShell
-			// Allow alphanumeric, spaces, dots, underscores, hyphens, backslashes, and colons (for drive letters)
-			for _, r := range soundPath {
-				isValid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-					(r >= '0' && r <= '9') || r == ' ' || r == '.' ||
-					r == '_' || r == '-' || r == '\\' || r == ':'
-				if !isValid {
-					log.Printf("Sound path contains invalid character for PowerShell: %q in path %s", r, soundPath)
-					return
-				}
-			}
-			// Use PowerShell's SoundPlayer with proper escaping
-			//nolint:gocritic // Need literal quotes in PowerShell script
-			script := fmt.Sprintf(`(New-Object Media.SoundPlayer "%s").PlaySync()`,
-				strings.ReplaceAll(soundPath, `"`, `""`))
-			cmd = exec.CommandContext(soundCtx, "powershell", "-WindowStyle", "Hidden", "-c", script)
+			// Use Windows Media Player API via rundll32 to avoid PowerShell script injection
+			// This is safer than constructing PowerShell scripts with user paths
+			cmd = exec.CommandContext(soundCtx, "cmd", "/c", "start", "/min", "", soundPath)
 		case "linux":
 			// Try paplay first (PulseAudio), then aplay (ALSA)
 			cmd = exec.CommandContext(soundCtx, "paplay", soundPath)

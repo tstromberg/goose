@@ -48,6 +48,19 @@ const (
 	// Retry settings for external API calls - exponential backoff with jitter up to 2 minutes.
 	maxRetryDelay = 2 * time.Minute
 	maxRetries    = 10 // Should reach 2 minutes with exponential backoff
+
+	// Failure thresholds.
+	minorFailureThreshold = 3
+	majorFailureThreshold = 10
+	panicFailureIncrement = 10
+
+	// Notification settings.
+	reminderInterval     = 24 * time.Hour
+	historyRetentionDays = 30
+
+	// Turn API settings.
+	turnAPITimeout            = 10 * time.Second
+	maxConcurrentTurnAPICalls = 10
 )
 
 // PR represents a pull request with metadata.
@@ -131,6 +144,13 @@ func main() {
 	flag.DurationVar(&updateInterval, "interval", defaultUpdateInterval, "Update interval (e.g. 30s, 1m, 5m)")
 	flag.Parse()
 
+	// Validate target user if provided
+	if targetUser != "" {
+		if err := validateGitHubUsername(targetUser); err != nil {
+			log.Fatalf("Invalid target user: %v", err)
+		}
+	}
+
 	// Validate update interval
 	if updateInterval < minUpdateInterval {
 		log.Printf("Update interval %v too short, using minimum of %v", updateInterval, minUpdateInterval)
@@ -198,9 +218,9 @@ func main() {
 	}
 	app.currentUser = user
 
-	// Log if we're using a different target user
+	// Log if we're using a different target user (sanitized)
 	if app.targetUser != "" && app.targetUser != user.GetLogin() {
-		log.Printf("Querying PRs for user '%s' instead of authenticated user '%s'", app.targetUser, user.GetLogin())
+		log.Printf("Querying PRs for user '%s' instead of authenticated user", sanitizeForLog(app.targetUser))
 	}
 
 	log.Println("Starting systray...")
@@ -264,7 +284,7 @@ func (app *App) updateLoop(ctx context.Context) {
 
 			// Update failure count
 			app.mu.Lock()
-			app.consecutiveFailures += 10 // Treat panic as critical failure
+			app.consecutiveFailures += panicFailureIncrement // Treat panic as critical failure
 			app.mu.Unlock()
 
 			// Signal app to quit after panic
@@ -302,10 +322,6 @@ func (app *App) updatePRs(ctx context.Context) {
 		app.mu.Unlock()
 
 		// Progressive degradation based on failure count
-		const (
-			minorFailureThreshold = 3
-			majorFailureThreshold = 10
-		)
 		var title, tooltip string
 		switch {
 		case failureCount == 1:
@@ -470,10 +486,6 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.mu.Unlock()
 
 		// Progressive degradation based on failure count
-		const (
-			minorFailureThreshold = 3
-			majorFailureThreshold = 10
-		)
 		var title, tooltip string
 		switch {
 		case failureCount == 1:
@@ -658,8 +670,7 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	now := time.Now()
 	staleThreshold := now.Add(-stalePRThreshold)
 
-	// Reminder interval for re-notifications (24 hours)
-	const reminderInterval = 24 * time.Hour
+	// Use reminder interval constant from package level
 
 	currentBlockedPRs := make(map[string]bool)
 	playedIncomingSound := false

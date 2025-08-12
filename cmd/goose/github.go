@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -20,9 +19,6 @@ import (
 	"github.com/ready-to-review/turnclient/pkg/turn"
 	"golang.org/x/oauth2"
 )
-
-// githubTokenRegex matches valid GitHub token formats.
-var githubTokenRegex = regexp.MustCompile(`^(ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})$`)
 
 // initClients initializes GitHub and Turn API clients.
 func (app *App) initClients(ctx context.Context) error {
@@ -63,7 +59,6 @@ func (*App) token(ctx context.Context) (string, error) {
 		log.Println("Using GitHub token from GITHUB_TOKEN environment variable")
 		return token, nil
 	}
-
 	// Only check absolute paths for security - never use PATH
 	var trustedPaths []string
 	switch runtime.GOOS {
@@ -103,8 +98,11 @@ func (*App) token(ctx context.Context) (string, error) {
 			const executableMask = 0o111
 			if info.Mode().IsRegular() && info.Mode()&executableMask != 0 {
 				// Verify it's actually the gh binary by running version command
-				cmd := exec.Command(path, "version") //nolint:noctx // Quick version check doesn't need context
+				// Use timeout to prevent hanging
+				versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				cmd := exec.CommandContext(versionCtx, path, "version")
 				output, err := cmd.Output()
+				cancel() // Call cancel immediately after command execution
 				if err == nil && strings.Contains(string(output), "gh version") {
 					log.Printf("Found and verified gh at: %s", path)
 					ghPath = path
@@ -115,25 +113,21 @@ func (*App) token(ctx context.Context) (string, error) {
 	}
 
 	if ghPath == "" {
-		return "", errors.New("gh cli not found in trusted locations")
+		return "", errors.New("gh cli not found in trusted locations and GITHUB_TOKEN not set")
 	}
 
 	log.Printf("Executing command: %s auth token", ghPath)
 	cmd := exec.CommandContext(ctx, ghPath, "auth", "token")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("gh command failed with output: %s", string(output))
-		return "", fmt.Errorf("exec 'gh auth token': %w (output: %s)", err, string(output))
+		log.Printf("gh command failed: %v", err)
+		return "", fmt.Errorf("exec 'gh auth token': %w", err)
 	}
 	token := strings.TrimSpace(string(output))
-	if token == "" {
-		return "", errors.New("empty github token")
+	if err := validateGitHubToken(token); err != nil {
+		return "", fmt.Errorf("invalid token from gh CLI: %w", err)
 	}
-	const minTokenLength = 20
-	if len(token) < minTokenLength {
-		return "", fmt.Errorf("invalid github token length: %d", len(token))
-	}
-	log.Println("Successfully obtained GitHub token")
+	log.Println("Successfully obtained GitHub token from gh CLI")
 	return token, nil
 }
 
@@ -400,7 +394,10 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 	// Use a WaitGroup to track goroutines
 	var wg sync.WaitGroup
 
-	// Process PRs in parallel
+	// Create semaphore to limit concurrent Turn API calls
+	sem := make(chan struct{}, maxConcurrentTurnAPICalls)
+
+	// Process PRs in parallel with concurrency limit
 	for _, issue := range issues {
 		if !issue.IsPullRequest() {
 			continue
@@ -409,6 +406,10 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 		wg.Add(1)
 		go func(issue *github.Issue) {
 			defer wg.Done()
+
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			url := issue.GetHTMLURL()
 			updatedAt := issue.GetUpdatedAt().Time
@@ -490,7 +491,10 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 	// Use a WaitGroup to track goroutines
 	var wg sync.WaitGroup
 
-	// Process PRs in parallel
+	// Create semaphore to limit concurrent Turn API calls
+	sem := make(chan struct{}, maxConcurrentTurnAPICalls)
+
+	// Process PRs in parallel with concurrency limit
 	for _, issue := range issues {
 		if !issue.IsPullRequest() {
 			continue
@@ -499,6 +503,10 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 		wg.Add(1)
 		go func(issue *github.Issue) {
 			defer wg.Done()
+
+			// Acquire semaphore
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
 			url := issue.GetHTMLURL()
 			updatedAt := issue.GetUpdatedAt().Time

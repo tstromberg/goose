@@ -15,7 +15,6 @@ import (
 	"github.com/energye/systray"
 )
 
-// formatAge formats a duration in human-readable form.
 // openURL safely opens a URL in the default browser after validation.
 func openURL(ctx context.Context, rawURL string) error {
 	// Parse and validate the URL
