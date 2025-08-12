@@ -1,4 +1,4 @@
-module github.com/ready-to-review/pr-menubar
+module github.com/ready-to-review/goose
 
 go 1.23.4
 
