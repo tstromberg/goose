@@ -43,6 +43,7 @@ cd goose && make run
 - Blocking logic isn't 100% accurate (we're working on it)
 - Linux/BSD/Windows support likely works, but remains untested
 - The goose may not stop honking until you review your PRs
+- Visual notifications won't work on macOS until we sign the binary
 
 ## Pricing
 
