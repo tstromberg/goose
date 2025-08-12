@@ -708,7 +708,7 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 			continue
 		}
 
-		// If we already played the incoming sound (goose/honk), wait 2 seconds before playing outgoing sound (tada)
+		// If we already played the incoming sound (goose/honk), wait 2 seconds before playing outgoing sound (jet)
 		if playedIncomingSound && !playedOutgoingSound {
 			// Check if this PR would trigger a sound
 			prevState, hasHistory := notificationHistory[pr.URL]
@@ -725,7 +725,7 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 			}
 
 			if wouldPlaySound {
-				log.Println("[SOUND] Delaying 2 seconds between goose and tada sounds")
+				log.Println("[SOUND] Delaying 2 seconds between goose and jet sounds")
 				time.Sleep(2 * time.Second)
 			}
 		}

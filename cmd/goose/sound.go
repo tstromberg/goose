@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-//go:embed sounds/tada.wav
-var tadaSound []byte
+//go:embed sounds/jet.wav
+var jetSound []byte
 
 //go:embed sounds/honk.wav
 var honkSound []byte
@@ -32,11 +32,11 @@ func (app *App) initSoundCache() {
 			return
 		}
 
-		// Write tada sound
-		tadaPath := filepath.Join(soundDir, "tada.wav")
-		if _, err := os.Stat(tadaPath); os.IsNotExist(err) {
-			if err := os.WriteFile(tadaPath, tadaSound, 0o600); err != nil {
-				log.Printf("Failed to cache tada sound: %v", err)
+		// Write jet sound
+		jetPath := filepath.Join(soundDir, "jet.wav")
+		if _, err := os.Stat(jetPath); os.IsNotExist(err) {
+			if err := os.WriteFile(jetPath, jetSound, 0o600); err != nil {
+				log.Printf("Failed to cache jet sound: %v", err)
 			}
 		}
 
@@ -58,7 +58,7 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 
 	// Select the sound file with validation to prevent path traversal
 	allowedSounds := map[string]string{
-		"rocket": "tada.wav",
+		"rocket": "jet.wav",
 		"honk":   "honk.wav",
 	}
 

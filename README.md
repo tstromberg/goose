@@ -16,7 +16,7 @@ Lives in your menubar like a tiny waterfowl of productivity shame, watching your
 ## What It Does
 
 - **🪿 Honks** when you're blocking someone's PR (authentic goose noises included)
-- **🎉 Tada sounds** when your own PR is ready for the next stage
+- **✈️ Jet sounds** when your own PR is ready for the next stage
 - **🧠 Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
 - **⭐ Auto-start** on login (macOS)
 
