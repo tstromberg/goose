@@ -53,7 +53,9 @@ This tool is part of the [CodeGroove](https://codegroove.dev) developer accelera
 
 ## Privacy
 
-Your GitHub token is used to fetch PR metadata, but is never stored or logged. GitHub metadata for open pull requests may be cached for up to 20 days for performance reasons. We won't sell your information or use it for any purpose other than caching.
+- Your GitHub token is used to fetch PR metadata, but is never stored or logged.
+- We won't sell your information or use it for any purpose other than caching.
+- GitHub metadata for open pull requests may be cached for up to 20 days for performance reasons.
 
 ---
 
