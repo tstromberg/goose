@@ -58,7 +58,7 @@ We don't yet try to persist fine-grained tokens to disk - PR's welcome!
 
 ## Known Issues
 
-- Blocking logic isn't 100% accurate (we're working on it)
+- Blocking logic isn't 100% accurate - issues welcome!
 - The goose may not stop honking until you review your PRs
 - Visual notifications won't work on macOS until we sign the binary
 - Linux, BSD, and Windows support is implemented but untested
