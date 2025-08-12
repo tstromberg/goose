@@ -44,7 +44,7 @@ cd goose && make run
 
 If you want more control over which repositories the goose can access, you can use a GitHub personal access token instead:
 
-1. Create a [GitHub personal access token](https://github.com/settings/tokens) with `repo` scope
+1. Create a [GitHub personal access token](https://github.com/settings/tokens) with access to read pull-requests and repo metadata.
 2. Set the `GITHUB_TOKEN` environment variable:
 
 ```bash
