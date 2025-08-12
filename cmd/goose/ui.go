@@ -287,18 +287,24 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		hideStaleItem.Check()
 	}
 	hideStaleItem.Click(func() {
+		app.mu.Lock()
 		app.hideStaleIncoming = !app.hideStaleIncoming
-		if app.hideStaleIncoming {
+		hideStale := app.hideStaleIncoming
+		// Clear menu state to force rebuild
+		app.lastMenuState = nil
+		app.mu.Unlock()
+
+		if hideStale {
 			hideStaleItem.Check()
 		} else {
 			hideStaleItem.Uncheck()
 		}
+
+		// Save settings to disk
+		app.saveSettings()
+
 		// Toggle hide stale PRs setting
 		// Force menu rebuild since hideStaleIncoming changed
-		app.mu.Lock()
-		// Clear menu state to force rebuild
-		app.lastMenuState = nil
-		app.mu.Unlock()
 		app.rebuildMenu(ctx)
 	})
 
@@ -323,10 +329,39 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 			reminderItem.Uncheck()
 			log.Println("[SETTINGS] Daily reminders disabled")
 		}
+
+		// Save settings to disk
+		app.saveSettings()
 	})
 
 	// Add login item option (macOS only)
 	addLoginItemUI(ctx, app)
+
+	// Audio cues
+	// Add 'Audio cues' option
+	audioItem := systray.AddMenuItem("Audio cues", "Play sounds for notifications")
+	app.mu.RLock()
+	if app.enableAudioCues {
+		audioItem.Check()
+	}
+	app.mu.RUnlock()
+	audioItem.Click(func() {
+		app.mu.Lock()
+		app.enableAudioCues = !app.enableAudioCues
+		enabled := app.enableAudioCues
+		app.mu.Unlock()
+
+		if enabled {
+			audioItem.Check()
+			log.Println("[SETTINGS] Audio cues enabled")
+		} else {
+			audioItem.Uncheck()
+			log.Println("[SETTINGS] Audio cues disabled")
+		}
+
+		// Save settings to disk
+		app.saveSettings()
+	})
 
 	// Quit
 	// Add 'Quit' option

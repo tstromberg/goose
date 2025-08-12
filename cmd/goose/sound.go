@@ -52,6 +52,16 @@ func (app *App) initSoundCache() {
 
 // playSound plays a cached sound file using platform-specific commands.
 func (app *App) playSound(ctx context.Context, soundType string) {
+	// Check if audio cues are enabled
+	app.mu.RLock()
+	audioEnabled := app.enableAudioCues
+	app.mu.RUnlock()
+
+	if !audioEnabled {
+		log.Printf("[SOUND] Sound playback skipped (audio cues disabled): %s", soundType)
+		return
+	}
+
 	log.Printf("[SOUND] Playing %s sound", soundType)
 	// Ensure sounds are cached
 	app.initSoundCache()
