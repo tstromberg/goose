@@ -132,6 +132,7 @@ type App struct {
 	hideStaleIncoming   bool
 	loadingTurnData     bool
 	enableReminders     bool // Whether to send daily reminder notifications
+	enableAudioCues     bool // Whether to play audio cues for notifications
 }
 
 func main() {
@@ -183,7 +184,11 @@ func main() {
 		updateInterval:      updateInterval,
 		pendingTurnResults:  make([]TurnResult, 0),
 		enableReminders:     true,
+		enableAudioCues:     true,
 	}
+
+	// Load saved settings
+	app.loadSettings()
 
 	log.Println("Initializing GitHub clients...")
 	err = app.initClients(ctx)
