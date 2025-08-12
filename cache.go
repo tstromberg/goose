@@ -64,7 +64,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	var data *turn.CheckResponse
 	err := retry.Do(func() error {
 		// Create timeout context for Turn API call
-		turnCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		turnCtx, cancel := context.WithTimeout(ctx, turnAPITimeout)
 		defer cancel()
 
 		var retryErr error

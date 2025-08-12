@@ -47,6 +47,19 @@ const (
 	// Retry settings for external API calls - exponential backoff with jitter up to 2 minutes.
 	maxRetryDelay = 2 * time.Minute
 	maxRetries    = 10 // Should reach 2 minutes with exponential backoff
+
+	// Failure thresholds.
+	minorFailureThreshold = 3
+	majorFailureThreshold = 10
+	panicFailureIncrement = 10
+
+	// Notification settings.
+	reminderInterval     = 24 * time.Hour
+	historyRetentionDays = 30
+
+	// Turn API settings.
+	turnAPITimeout            = 10 * time.Second
+	maxConcurrentTurnAPICalls = 10
 )
 
 // PR represents a pull request with metadata.
@@ -270,7 +283,7 @@ func (app *App) updateLoop(ctx context.Context) {
 
 			// Update failure count
 			app.mu.Lock()
-			app.consecutiveFailures += 10 // Treat panic as critical failure
+			app.consecutiveFailures += panicFailureIncrement // Treat panic as critical failure
 			app.mu.Unlock()
 
 			// Signal app to quit after panic
@@ -308,10 +321,6 @@ func (app *App) updatePRs(ctx context.Context) {
 		app.mu.Unlock()
 
 		// Progressive degradation based on failure count
-		const (
-			minorFailureThreshold = 3
-			majorFailureThreshold = 10
-		)
 		var title, tooltip string
 		switch {
 		case failureCount == 1:
@@ -475,10 +484,6 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.mu.Unlock()
 
 		// Progressive degradation based on failure count
-		const (
-			minorFailureThreshold = 3
-			majorFailureThreshold = 10
-		)
 		var title, tooltip string
 		switch {
 		case failureCount == 1:
@@ -541,35 +546,6 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	app.checkForNewlyBlockedPRs(ctx)
 }
 
-// shouldNotifyForPR determines if we should send a notification for a PR.
-func shouldNotifyForPR(
-	_ string,
-	isBlocked bool,
-	prevState NotificationState,
-	hasHistory bool,
-	reminderInterval time.Duration,
-	enableReminders bool,
-) (shouldNotify bool, reason string) {
-	if !hasHistory && isBlocked {
-		return true, "newly blocked"
-	}
-
-	if !hasHistory {
-		return false, ""
-	}
-
-	switch {
-	case isBlocked && !prevState.WasBlocked:
-		return true, "became blocked"
-	case !isBlocked && prevState.WasBlocked:
-		return false, "unblocked"
-	case isBlocked && prevState.WasBlocked && enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
-		return true, "reminder"
-	default:
-		return false, ""
-	}
-}
-
 // processPRNotifications handles notification logic for a single PR.
 func (app *App) processPRNotifications(
 	ctx context.Context,
@@ -582,7 +558,24 @@ func (app *App) processPRNotifications(
 	reminderInterval time.Duration,
 ) {
 	prevState, hasHistory := notificationHistory[pr.URL]
-	shouldNotify, notifyReason := shouldNotifyForPR(pr.URL, isBlocked, prevState, hasHistory, reminderInterval, app.enableReminders)
+
+	// Determine if we should notify (inlined from shouldNotifyForPR)
+	var shouldNotify bool
+	var notifyReason string
+	switch {
+	case !hasHistory && isBlocked:
+		shouldNotify, notifyReason = true, "newly blocked"
+	case !hasHistory:
+		shouldNotify, notifyReason = false, ""
+	case isBlocked && !prevState.WasBlocked:
+		shouldNotify, notifyReason = true, "became blocked"
+	case !isBlocked && prevState.WasBlocked:
+		shouldNotify, notifyReason = false, "unblocked"
+	case isBlocked && prevState.WasBlocked && app.enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
+		shouldNotify, notifyReason = true, "reminder"
+	default:
+		shouldNotify, notifyReason = false, ""
+	}
 
 	// Update state for unblocked PRs
 	if notifyReason == "unblocked" {
@@ -669,8 +662,7 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	now := time.Now()
 	staleThreshold := now.Add(-stalePRThreshold)
 
-	// Reminder interval for re-notifications (24 hours)
-	const reminderInterval = 24 * time.Hour
+	// Use reminder interval constant from package level
 
 	currentBlockedPRs := make(map[string]bool)
 	playedIncomingSound := false
