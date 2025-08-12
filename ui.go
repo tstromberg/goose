@@ -306,6 +306,29 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		app.rebuildMenu(ctx)
 	})
 
+	// Daily reminders
+	// Add 'Daily reminders' option
+	reminderItem := systray.AddMenuItem("Daily reminders", "Send reminder notifications for blocked PRs every 24 hours")
+	app.mu.RLock()
+	if app.enableReminders {
+		reminderItem.Check()
+	}
+	app.mu.RUnlock()
+	reminderItem.Click(func() {
+		app.mu.Lock()
+		app.enableReminders = !app.enableReminders
+		enabled := app.enableReminders
+		app.mu.Unlock()
+
+		if enabled {
+			reminderItem.Check()
+			log.Println("[SETTINGS] Daily reminders enabled")
+		} else {
+			reminderItem.Uncheck()
+			log.Println("[SETTINGS] Daily reminders disabled")
+		}
+	})
+
 	// Add login item option (macOS only)
 	addLoginItemUI(ctx, app)
 

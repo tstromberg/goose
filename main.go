@@ -89,12 +89,19 @@ type TurnResult struct {
 	WasFromCache bool // Track if this result came from cache
 }
 
+// NotificationState tracks the last known state and notification time for a PR.
+type NotificationState struct {
+	LastNotified time.Time
+	WasBlocked   bool
+}
+
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
 	turnClient          *turn.Client
 	currentUser         *github.User
 	previousBlockedPRs  map[string]bool
+	notificationHistory map[string]NotificationState // Track state and notification time per PR
 	client              *github.Client
 	lastMenuState       *MenuState
 	targetUser          string
@@ -110,6 +117,7 @@ type App struct {
 	noCache             bool
 	hideStaleIncoming   bool
 	loadingTurnData     bool
+	enableReminders     bool // Whether to send daily reminder notifications
 }
 
 func main() {
@@ -145,13 +153,15 @@ func main() {
 	}
 
 	app := &App{
-		cacheDir:           cacheDir,
-		hideStaleIncoming:  true,
-		previousBlockedPRs: make(map[string]bool),
-		targetUser:         targetUser,
-		noCache:            noCache,
-		updateInterval:     updateInterval,
-		pendingTurnResults: make([]TurnResult, 0),
+		cacheDir:            cacheDir,
+		hideStaleIncoming:   true,
+		previousBlockedPRs:  make(map[string]bool),
+		notificationHistory: make(map[string]NotificationState),
+		targetUser:          targetUser,
+		noCache:             noCache,
+		updateInterval:      updateInterval,
+		pendingTurnResults:  make([]TurnResult, 0),
+		enableReminders:     true,
 	}
 
 	log.Println("Initializing GitHub clients...")
@@ -524,12 +534,114 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	app.checkForNewlyBlockedPRs(ctx)
 }
 
+// shouldNotifyForPR determines if we should send a notification for a PR.
+func shouldNotifyForPR(
+	_ string,
+	isBlocked bool,
+	prevState NotificationState,
+	hasHistory bool,
+	reminderInterval time.Duration,
+	enableReminders bool,
+) (shouldNotify bool, reason string) {
+	if !hasHistory && isBlocked {
+		return true, "newly blocked"
+	}
+
+	if !hasHistory {
+		return false, ""
+	}
+
+	switch {
+	case isBlocked && !prevState.WasBlocked:
+		return true, "became blocked"
+	case !isBlocked && prevState.WasBlocked:
+		return false, "unblocked"
+	case isBlocked && prevState.WasBlocked && enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
+		return true, "reminder"
+	default:
+		return false, ""
+	}
+}
+
+// processPRNotifications handles notification logic for a single PR.
+func (app *App) processPRNotifications(
+	ctx context.Context,
+	pr PR,
+	isBlocked bool,
+	isIncoming bool,
+	notificationHistory map[string]NotificationState,
+	playedSound *bool,
+	now time.Time,
+	reminderInterval time.Duration,
+) {
+	prevState, hasHistory := notificationHistory[pr.URL]
+	shouldNotify, notifyReason := shouldNotifyForPR(pr.URL, isBlocked, prevState, hasHistory, reminderInterval, app.enableReminders)
+
+	// Update state for unblocked PRs
+	if notifyReason == "unblocked" {
+		notificationHistory[pr.URL] = NotificationState{
+			LastNotified: prevState.LastNotified,
+			WasBlocked:   false,
+		}
+		return
+	}
+
+	if !shouldNotify || !isBlocked {
+		return
+	}
+
+	// Send notification
+	var title, soundType string
+	if isIncoming {
+		title = "PR Blocked on You 🪿"
+		soundType = "honk"
+		if notifyReason == "reminder" {
+			log.Printf("[NOTIFY] Incoming PR reminder (24hr): %s #%d - %s (reason: %s)",
+				pr.Repository, pr.Number, pr.Title, pr.ActionReason)
+		} else {
+			log.Printf("[NOTIFY] Incoming PR notification (%s): %s #%d - %s (reason: %s)",
+				notifyReason, pr.Repository, pr.Number, pr.Title, pr.ActionReason)
+		}
+	} else {
+		title = "Your PR is Blocked 🚀"
+		soundType = "rocket"
+		if notifyReason == "reminder" {
+			log.Printf("[NOTIFY] Outgoing PR reminder (24hr): %s #%d - %s (reason: %s)",
+				pr.Repository, pr.Number, pr.Title, pr.ActionReason)
+		} else {
+			log.Printf("[NOTIFY] Outgoing PR notification (%s): %s #%d - %s (reason: %s)",
+				notifyReason, pr.Repository, pr.Number, pr.Title, pr.ActionReason)
+		}
+	}
+
+	message := fmt.Sprintf("%s #%d: %s", pr.Repository, pr.Number, pr.Title)
+	if err := beeep.Notify(title, message, ""); err != nil {
+		log.Printf("[NOTIFY] Failed to send desktop notification for %s: %v", pr.URL, err)
+	} else {
+		log.Printf("[NOTIFY] Desktop notification sent for %s", pr.URL)
+		notificationHistory[pr.URL] = NotificationState{
+			LastNotified: now,
+			WasBlocked:   true,
+		}
+	}
+
+	// Play sound once per polling period
+	if !*playedSound {
+		if notifyReason == "reminder" {
+			log.Printf("[SOUND] Playing %s sound for daily reminder", soundType)
+		}
+		app.playSound(ctx, soundType)
+		*playedSound = true
+	}
+}
+
 // checkForNewlyBlockedPRs checks for PRs that have become blocked and sends notifications.
 func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	app.mu.Lock()
-	oldBlockedPRs := app.previousBlockedPRs
-	if oldBlockedPRs == nil {
-		oldBlockedPRs = make(map[string]bool)
+	notificationHistory := app.notificationHistory
+	if notificationHistory == nil {
+		notificationHistory = make(map[string]NotificationState)
+		app.notificationHistory = notificationHistory
 	}
 	initialLoadComplete := app.initialLoadComplete
 	hideStaleIncoming := app.hideStaleIncoming
@@ -537,83 +649,73 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	copy(incoming, app.incoming)
 	outgoing := make([]PR, len(app.outgoing))
 	copy(outgoing, app.outgoing)
+	hasValidData := len(incoming) > 0 || len(outgoing) > 0
 	app.mu.Unlock()
 
-	// Only log when we're checking after initial load is complete
-	if initialLoadComplete && len(oldBlockedPRs) > 0 {
-		log.Printf("[NOTIFY] Checking for newly blocked PRs (oldBlockedCount=%d)", len(oldBlockedPRs))
+	// Skip if this looks like a transient GitHub API failure
+	if !hasValidData && initialLoadComplete {
+		log.Print("[NOTIFY] Skipping notification check - no PR data (likely transient API failure)")
+		return
 	}
 
 	// Calculate stale threshold
 	now := time.Now()
 	staleThreshold := now.Add(-stalePRThreshold)
 
+	// Reminder interval for re-notifications (24 hours)
+	const reminderInterval = 24 * time.Hour
+
 	currentBlockedPRs := make(map[string]bool)
 	playedIncomingSound := false
 	playedOutgoingSound := false
 
-	// Check incoming PRs for newly blocked ones
-	for i := range incoming {
-		if incoming[i].NeedsReview {
-			currentBlockedPRs[incoming[i].URL] = true
+	// Check incoming PRs for state changes
+	for idx := range incoming {
+		pr := incoming[idx]
+		isBlocked := pr.NeedsReview
 
-			// Skip stale PRs for notifications if hideStaleIncoming is enabled
-			if hideStaleIncoming && incoming[i].UpdatedAt.Before(staleThreshold) {
-				continue
-			}
+		if isBlocked {
+			currentBlockedPRs[pr.URL] = true
+		}
 
-			// Send notification and play sound if PR wasn't blocked before
-			if !oldBlockedPRs[incoming[i].URL] {
-				log.Printf("[NOTIFY] New blocked incoming PR: %s #%d - %s (reason: %s)",
-					incoming[i].Repository, incoming[i].Number, incoming[i].Title, incoming[i].ActionReason)
-				title := "PR Blocked on You 🪿"
-				message := fmt.Sprintf("%s #%d: %s", incoming[i].Repository, incoming[i].Number, incoming[i].Title)
-				if err := beeep.Notify(title, message, ""); err != nil {
-					log.Printf("[NOTIFY] Failed to send desktop notification for %s: %v", incoming[i].URL, err)
-				} else {
-					log.Printf("[NOTIFY] Desktop notification sent for %s", incoming[i].URL)
-				}
-				// Only play sound once per polling period
-				if !playedIncomingSound {
-					app.playSound(ctx, "honk")
-					playedIncomingSound = true
-				}
-			}
+		// Skip stale PRs for notifications if hideStaleIncoming is enabled
+		if hideStaleIncoming && pr.UpdatedAt.Before(staleThreshold) {
+			continue
+		}
+
+		app.processPRNotifications(ctx, pr, isBlocked, true, notificationHistory,
+			&playedIncomingSound, now, reminderInterval)
+	}
+
+	// Check outgoing PRs for state changes
+	for idx := range outgoing {
+		pr := outgoing[idx]
+		isBlocked := pr.IsBlocked
+
+		if isBlocked {
+			currentBlockedPRs[pr.URL] = true
+		}
+
+		// Skip stale PRs for notifications if hideStaleIncoming is enabled
+		if hideStaleIncoming && pr.UpdatedAt.Before(staleThreshold) {
+			continue
+		}
+
+		app.processPRNotifications(ctx, pr, isBlocked, false, notificationHistory,
+			&playedOutgoingSound, now, reminderInterval)
+	}
+
+	// Clean up old entries from notification history (older than 7 days)
+	const historyRetentionDays = 7
+	for url, state := range notificationHistory {
+		if time.Since(state.LastNotified) > historyRetentionDays*24*time.Hour {
+			delete(notificationHistory, url)
 		}
 	}
 
-	// Check outgoing PRs for newly blocked ones
-	for i := range outgoing {
-		if outgoing[i].IsBlocked {
-			currentBlockedPRs[outgoing[i].URL] = true
-
-			// Skip stale PRs for notifications if hideStaleIncoming is enabled
-			if hideStaleIncoming && outgoing[i].UpdatedAt.Before(staleThreshold) {
-				continue
-			}
-
-			// Send notification and play sound if PR wasn't blocked before
-			if !oldBlockedPRs[outgoing[i].URL] {
-				log.Printf("[NOTIFY] New blocked outgoing PR: %s #%d - %s (reason: %s)",
-					outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title, outgoing[i].ActionReason)
-				title := "Your PR is Blocked 🚀"
-				message := fmt.Sprintf("%s #%d: %s", outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
-				if err := beeep.Notify(title, message, ""); err != nil {
-					log.Printf("[NOTIFY] Failed to send desktop notification for %s: %v", outgoing[i].URL, err)
-				} else {
-					log.Printf("[NOTIFY] Desktop notification sent for %s", outgoing[i].URL)
-				}
-				// Only play sound once per polling period
-				if !playedOutgoingSound {
-					app.playSound(ctx, "rocket")
-					playedOutgoingSound = true
-				}
-			}
-		}
-	}
-
-	// Update the previous blocked PRs map
+	// Update the notification history
 	app.mu.Lock()
+	app.notificationHistory = notificationHistory
 	app.previousBlockedPRs = currentBlockedPRs
 	app.mu.Unlock()
 }

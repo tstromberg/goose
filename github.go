@@ -245,7 +245,7 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 			continue
 		}
 		log.Printf("[GITHUB] Query completed: %s - found %d PRs", result.query, len(result.issues))
-		
+
 		// Deduplicate PRs based on URL
 		for _, issue := range result.issues {
 			url := issue.GetHTMLURL()
