@@ -36,7 +36,10 @@ func (r *RateLimiter) Allow() bool {
 	tokensToAdd := int(elapsed / r.refillRate)
 
 	if tokensToAdd > 0 {
-		r.tokens = minInt(r.tokens+tokensToAdd, r.maxTokens)
+		r.tokens += tokensToAdd
+		if r.tokens > r.maxTokens {
+			r.tokens = r.maxTokens
+		}
 		r.lastRefill = now
 	}
 
@@ -47,12 +50,4 @@ func (r *RateLimiter) Allow() bool {
 	}
 
 	return false
-}
-
-// minInt returns the minimum of two integers.
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
