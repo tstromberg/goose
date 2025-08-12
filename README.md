@@ -9,14 +9,14 @@ The only PR tracker that honks at you when you're the bottleneck. Now shipping w
 
 Lives in your menubar like a tiny waterfowl of productivity shame, watching your GitHub PRs and making aggressive bird sounds when you're blocking someone's code from seeing the light of production.
 
-> ⚠️ **EXPERIMENTAL**: This is very much a work in progress. The blocking logic has bugs. It theoretically runs on Linux, BSD, and Windows but we've literally never tested it there. Here be dragons (and geese).
+> ⚠️ **EXPERIMENTAL**: This is very much a work in progress. The blocking logic has bugs. Linux/BSD/Windows support is untested. Here be dragons (and geese).
 
 ![PR Menubar Screenshot](media/screenshot.png)
 
 ## What It Does
 
 - **🪿 Honks** when you're blocking someone's PR (authentic goose noises included)
-- **🚀 Rocket sounds** when own your own PR is ready to go to the next stage
+- **✈️ Jet sounds** when your own PR is ready for the next stage
 - **🧠 Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
 - **⭐ Auto-start** on login (macOS)
 
@@ -71,7 +71,6 @@ When `GITHUB_TOKEN` is set, the goose will use it directly instead of the GitHub
 ## Known Issues
 
 - Blocking logic isn't 100% accurate (we're working on it)
-- Linux/BSD/Windows support likely works, but remains untested
 - The goose may not stop honking until you review your PRs
 - Visual notifications won't work on macOS until we sign the binary
 
@@ -83,9 +82,9 @@ This tool is part of the [CodeGroove](https://codegroove.dev) developer accelera
 
 ## Privacy
 
-- Your GitHub token is used to fetch PR metadata, but is never stored or logged.
-- We won't sell your information or use it for any purpose other than caching.
-- GitHub metadata for open pull requests may be cached for up to 20 days for performance reasons.
+- Your GitHub token is never stored or logged
+- PR metadata cached for up to 20 days (performance)
+- No telemetry or external data collection
 
 ---
 

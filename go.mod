@@ -8,7 +8,7 @@ require (
 	github.com/gen2brain/beeep v0.11.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v57 v57.0.0
-	github.com/ready-to-review/turnclient v0.0.0-20250718014946-bb5bb107649f
+	github.com/ready-to-review/turnclient v0.0.0-20250804200718-023200511dab
 	golang.org/x/oauth2 v0.30.0
 )
 
@@ -24,5 +24,5 @@ require (
 	github.com/sergeymakinen/go-ico v1.0.0-beta.0 // indirect
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	github.com/tevino/abool v0.0.0-20220530134649-2bfc934cb23c // indirect
-	golang.org/x/sys v0.34.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
 )

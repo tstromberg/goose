@@ -10,7 +10,10 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
 
-.PHONY: build clean deps run app-bundle install install-darwin install-unix install-windows
+.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows
+
+# Default target
+all: build
 
 # Install dependencies
 deps:
@@ -24,15 +27,15 @@ ifeq ($(shell uname),Darwin)
 	@echo "Running $(BUNDLE_NAME) from /Applications..."
 	@open "/Applications/$(BUNDLE_NAME).app"
 else
-	go run .
+	go run ./cmd/goose
 endif
 
 # Build for current platform
-build:
+build: out
 ifeq ($(OS),Windows_NT)
-	CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o $(APP_NAME).exe .
+	CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME).exe ./cmd/goose
 else
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(APP_NAME) .
+	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME) ./cmd/goose
 endif
 
 # Build for all platforms
@@ -40,23 +43,22 @@ build-all: build-darwin build-linux build-windows
 
 # Build for macOS
 build-darwin:
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 .
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 .
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 ./cmd/goose
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 ./cmd/goose
 
 # Build for Linux
 build-linux:
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 .
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 .
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 ./cmd/goose
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 ./cmd/goose
 
 # Build for Windows
 build-windows:
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe .
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe ./cmd/goose
 	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe .
 
 # Clean build artifacts
 clean:
 	rm -rf out/
-	rm -f $(APP_NAME)
 
 # Create out directory
 out:
@@ -163,7 +165,7 @@ install-darwin: app-bundle
 install-unix: build
 	@echo "Installing on $(shell uname)..."
 	@echo "Installing binary to /usr/local/bin..."
-	@sudo install -m 755 $(APP_NAME) /usr/local/bin/
+	@sudo install -m 755 out/$(APP_NAME) /usr/local/bin/
 	@echo "Installation complete! $(APP_NAME) has been installed to /usr/local/bin"
 
 # Install on Windows
@@ -172,7 +174,7 @@ install-windows: build
 	@echo "Creating program directory..."
 	@if not exist "%LOCALAPPDATA%\Programs\$(APP_NAME)" mkdir "%LOCALAPPDATA%\Programs\$(APP_NAME)"
 	@echo "Copying executable..."
-	@copy /Y "$(APP_NAME).exe" "%LOCALAPPDATA%\Programs\$(APP_NAME)\"
+	@copy /Y "out\$(APP_NAME).exe" "%LOCALAPPDATA%\Programs\$(APP_NAME)\"
 	@echo "Installation complete! $(APP_NAME) has been installed to %LOCALAPPDATA%\Programs\$(APP_NAME)"
 	@echo "You may want to add %LOCALAPPDATA%\Programs\$(APP_NAME) to your PATH environment variable."
 # BEGIN: lint-install .

@@ -37,7 +37,8 @@ const (
 	cacheCleanupInterval = 5 * 24 * time.Hour
 
 	// PR settings.
-	stalePRThreshold = 90 * 24 * time.Hour
+	dailyInterval    = 24 * time.Hour
+	stalePRThreshold = 90 * dailyInterval
 	maxPRsToProcess  = 200 // Limit for performance
 
 	// Update interval settings.
@@ -394,22 +395,23 @@ func (app *App) updatePRs(ctx context.Context) {
 // buildCurrentMenuState creates a MenuState representing the current menu items.
 func (app *App) buildCurrentMenuState() *MenuState {
 	// Apply the same filtering as the menu display (stale PR filtering)
-	var filteredIncoming, filteredOutgoing []PR
+	staleThreshold := time.Now().Add(-stalePRThreshold)
 
-	now := time.Now()
-	staleThreshold := now.Add(-stalePRThreshold)
-
-	for i := range app.incoming {
-		if !app.hideStaleIncoming || app.incoming[i].UpdatedAt.After(staleThreshold) {
-			filteredIncoming = append(filteredIncoming, app.incoming[i])
+	filterStale := func(prs []PR) []PR {
+		if !app.hideStaleIncoming {
+			return prs
 		}
+		var filtered []PR
+		for i := range prs {
+			if prs[i].UpdatedAt.After(staleThreshold) {
+				filtered = append(filtered, prs[i])
+			}
+		}
+		return filtered
 	}
 
-	for i := range app.outgoing {
-		if !app.hideStaleIncoming || app.outgoing[i].UpdatedAt.After(staleThreshold) {
-			filteredOutgoing = append(filteredOutgoing, app.outgoing[i])
-		}
-	}
+	filteredIncoming := filterStale(app.incoming)
+	filteredOutgoing := filterStale(app.outgoing)
 
 	// Sort PRs the same way the menu does
 	incomingSorted := sortPRsBlockedFirst(filteredIncoming)
@@ -559,22 +561,28 @@ func (app *App) processPRNotifications(
 ) {
 	prevState, hasHistory := notificationHistory[pr.URL]
 
-	// Determine if we should notify (inlined from shouldNotifyForPR)
+	// Inline notification decision logic
 	var shouldNotify bool
 	var notifyReason string
 	switch {
 	case !hasHistory && isBlocked:
-		shouldNotify, notifyReason = true, "newly blocked"
+		shouldNotify = true
+		notifyReason = "newly blocked"
 	case !hasHistory:
-		shouldNotify, notifyReason = false, ""
+		shouldNotify = false
+		notifyReason = ""
 	case isBlocked && !prevState.WasBlocked:
-		shouldNotify, notifyReason = true, "became blocked"
+		shouldNotify = true
+		notifyReason = "became blocked"
 	case !isBlocked && prevState.WasBlocked:
-		shouldNotify, notifyReason = false, "unblocked"
+		shouldNotify = false
+		notifyReason = "unblocked"
 	case isBlocked && prevState.WasBlocked && app.enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
-		shouldNotify, notifyReason = true, "reminder"
+		shouldNotify = true
+		notifyReason = "reminder"
 	default:
-		shouldNotify, notifyReason = false, ""
+		shouldNotify = false
+		notifyReason = ""
 	}
 
 	// Update state for unblocked PRs
@@ -698,6 +706,28 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 		// Skip stale PRs for notifications if hideStaleIncoming is enabled
 		if hideStaleIncoming && pr.UpdatedAt.Before(staleThreshold) {
 			continue
+		}
+
+		// If we already played the incoming sound (goose/honk), wait 2 seconds before playing outgoing sound (jet)
+		if playedIncomingSound && !playedOutgoingSound {
+			// Check if this PR would trigger a sound
+			prevState, hasHistory := notificationHistory[pr.URL]
+			var wouldPlaySound bool
+			switch {
+			case !hasHistory && isBlocked:
+				wouldPlaySound = true
+			case hasHistory && isBlocked && !prevState.WasBlocked:
+				wouldPlaySound = true
+			case hasHistory && isBlocked && prevState.WasBlocked && app.enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
+				wouldPlaySound = true
+			default:
+				wouldPlaySound = false
+			}
+
+			if wouldPlaySound {
+				log.Println("[SOUND] Delaying 2 seconds between goose and jet sounds")
+				time.Sleep(2 * time.Second)
+			}
 		}
 
 		app.processPRNotifications(ctx, pr, isBlocked, false, notificationHistory,

@@ -185,22 +185,22 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		if sortedPRs[i].NeedsReview {
 			title = fmt.Sprintf("• %s", title)
 		}
-		// Format age inline
+		// Format age inline for tooltip
 		duration := time.Since(sortedPRs[i].UpdatedAt)
-		var ageStr string
+		var age string
 		switch {
 		case duration < time.Hour:
-			ageStr = fmt.Sprintf("%dm", int(duration.Minutes()))
-		case duration < 24*time.Hour:
-			ageStr = fmt.Sprintf("%dh", int(duration.Hours()))
-		case duration < 30*24*time.Hour:
-			ageStr = fmt.Sprintf("%dd", int(duration.Hours()/24))
-		case duration < 365*24*time.Hour:
-			ageStr = fmt.Sprintf("%dmo", int(duration.Hours()/(24*30)))
+			age = fmt.Sprintf("%dm", int(duration.Minutes()))
+		case duration < dailyInterval:
+			age = fmt.Sprintf("%dh", int(duration.Hours()))
+		case duration < 30*dailyInterval:
+			age = fmt.Sprintf("%dd", int(duration.Hours()/24))
+		case duration < 365*dailyInterval:
+			age = fmt.Sprintf("%dmo", int(duration.Hours()/(24*30)))
 		default:
-			ageStr = sortedPRs[i].UpdatedAt.Format("2006")
+			age = sortedPRs[i].UpdatedAt.Format("2006")
 		}
-		tooltip := fmt.Sprintf("%s (%s)", sortedPRs[i].Title, ageStr)
+		tooltip := fmt.Sprintf("%s (%s)", sortedPRs[i].Title, age)
 		// Add action reason for blocked PRs
 		if (sortedPRs[i].NeedsReview || sortedPRs[i].IsBlocked) && sortedPRs[i].ActionReason != "" {
 			tooltip = fmt.Sprintf("%s - %s", tooltip, sortedPRs[i].ActionReason)
