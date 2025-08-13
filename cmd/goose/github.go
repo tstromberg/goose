@@ -618,7 +618,7 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 	if app.menuInitialized {
 		// Only trigger menu update if PR data actually changed
 		if actualChanges > 0 {
-			app.updateMenuIfChanged(ctx)
+			app.updateMenu(ctx)
 		}
 	}
 }

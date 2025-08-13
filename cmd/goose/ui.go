@@ -191,11 +191,11 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		switch {
 		case duration < time.Hour:
 			age = fmt.Sprintf("%dm", int(duration.Minutes()))
-		case duration < dailyInterval:
+		case duration < 24*time.Hour:
 			age = fmt.Sprintf("%dh", int(duration.Hours()))
-		case duration < 30*dailyInterval:
+		case duration < 30*24*time.Hour:
 			age = fmt.Sprintf("%dd", int(duration.Hours()/24))
-		case duration < 365*dailyInterval:
+		case duration < 365*24*time.Hour:
 			age = fmt.Sprintf("%dmo", int(duration.Hours()/(24*30)))
 		default:
 			age = sortedPRs[i].UpdatedAt.Format("2006")
@@ -230,8 +230,8 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	app.setTrayTitle()
 
 	// Dashboard at the top
-	// Add Dashboard link
-	dashboardItem := systray.AddMenuItem("Dashboard", "")
+	// Add Web Dashboard link
+	dashboardItem := systray.AddMenuItem("Web Dashboard", "")
 	dashboardItem.Click(func() {
 		if err := openURL(ctx, "https://dash.ready-to-review.dev/"); err != nil {
 			log.Printf("failed to open dashboard: %v", err)
@@ -290,8 +290,8 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		app.mu.Lock()
 		app.hideStaleIncoming = !app.hideStaleIncoming
 		hideStale := app.hideStaleIncoming
-		// Clear menu state to force rebuild
-		app.lastMenuState = nil
+		// Clear menu titles to force rebuild
+		app.lastMenuTitles = nil
 		app.mu.Unlock()
 
 		if hideStale {
