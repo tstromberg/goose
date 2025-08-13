@@ -77,50 +77,50 @@ install-appify:
 app-bundle: out build-darwin install-appify
 	@echo "Removing old app bundle..."
 	@rm -rf "out/$(BUNDLE_NAME).app"
-	
+
 	@echo "Creating macOS application bundle with appify..."
-	
+
 	# Create universal binary
 	@echo "Creating universal binary..."
 	lipo -create out/$(APP_NAME)-darwin-amd64 out/$(APP_NAME)-darwin-arm64 \
 		-output out/$(APP_NAME)-universal
-	
+
 	# Copy logo to out directory
 	cp media/logo.png out/logo.png
-	
+
 	# Create menubar icon (small version with transparency)
 	@echo "Creating menubar icon..."
 	sips -z 44 44 media/logo.png --out out/menubar-icon.png
 	# Ensure the icon has an alpha channel
 	sips -s format png out/menubar-icon.png --out out/menubar-icon.png
-	
+
 	# Create app bundle with appify using universal binary
 	cd out && appify -name "$(BUNDLE_NAME)" \
 		-icon logo.png \
 		-id "$(BUNDLE_ID)" \
 		$(APP_NAME)-universal
-	
+
 	# Move the generated app to the expected location
 	@if [ -f "out/$(BUNDLE_NAME)-universal.app" ]; then \
 		mv "out/$(BUNDLE_NAME)-universal.app" "out/$(BUNDLE_NAME).app"; \
 	elif [ ! -d "out/$(BUNDLE_NAME).app" ]; then \
 		echo "Warning: App bundle not found in expected location"; \
 	fi
-	
+
 	# Copy menubar icon to Resources
 	@echo "Copying menubar icon to app bundle..."
 	cp out/menubar-icon.png "out/$(BUNDLE_NAME).app/Contents/Resources/menubar-icon.png"
-	
+
 	# Create English localization
 	@echo "Creating English localization..."
 	mkdir -p "out/$(BUNDLE_NAME).app/Contents/Resources/en.lproj"
-	
+
 	# Fix the executable name (appify adds .app suffix which we don't want)
 	@echo "Fixing executable name..."
 	@if [ -f "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME).app" ]; then \
 		mv "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME).app" "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME)"; \
 	fi
-	
+
 	# Fix the Info.plist
 	@echo "Fixing Info.plist..."
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Ready\\ to\\ Review" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
@@ -130,14 +130,14 @@ app-bundle: out build-darwin install-appify
 		/usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion en" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :NSUserNotificationAlertStyle string alert" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :NSUserNotificationAlertStyle alert" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
-	
+
 	# Remove extended attributes and code sign the app bundle
 	@echo "Preparing app bundle for signing..."
 	xattr -cr "out/$(BUNDLE_NAME).app"
-	
+
 	@echo "Code signing the app bundle..."
 	codesign --force --deep --sign - --options runtime "out/$(BUNDLE_NAME).app"
-	
+
 	@echo "macOS app bundle created: out/$(BUNDLE_NAME).app"
 
 # Install the application (detects OS automatically)
