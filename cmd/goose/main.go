@@ -115,14 +115,15 @@ type App struct {
 	turnClient          *turn.Client
 	currentUser         *github.User
 	previousBlockedPRs  map[string]bool
-	notificationHistory map[string]NotificationState // Track state and notification time per PR
+	notificationHistory map[string]NotificationState
 	client              *github.Client
 	lastMenuState       *MenuState
 	targetUser          string
 	cacheDir            string
-	incoming            []PR
+	authError           string
 	outgoing            []PR
 	pendingTurnResults  []TurnResult
+	incoming            []PR
 	consecutiveFailures int
 	updateInterval      time.Duration
 	mu                  sync.RWMutex
@@ -131,8 +132,54 @@ type App struct {
 	noCache             bool
 	hideStaleIncoming   bool
 	loadingTurnData     bool
-	enableReminders     bool // Whether to send daily reminder notifications
-	enableAudioCues     bool // Whether to play audio cues for notifications
+	enableReminders     bool
+	enableAudioCues     bool
+}
+
+func loadCurrentUser(ctx context.Context, app *App) {
+	log.Println("Loading current user...")
+
+	if app.client == nil {
+		log.Println("Skipping user load - no GitHub client available")
+		return
+	}
+
+	var user *github.User
+	err := retry.Do(func() error {
+		var retryErr error
+		user, _, retryErr = app.client.Users.Get(ctx, "")
+		if retryErr != nil {
+			log.Printf("GitHub Users.Get failed (will retry): %v", retryErr)
+			return retryErr
+		}
+		return nil
+	},
+		retry.Attempts(maxRetries),
+		retry.DelayType(retry.BackOffDelay),
+		retry.MaxDelay(maxRetryDelay),
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("GitHub Users.Get retry %d/%d: %v", n+1, maxRetries, err)
+		}),
+		retry.Context(ctx),
+	)
+	if err != nil {
+		log.Printf("Warning: Failed to load current user after %d retries: %v", maxRetries, err)
+		if app.authError == "" {
+			app.authError = fmt.Sprintf("Failed to load user: %v", err)
+		}
+		return
+	}
+
+	if user == nil {
+		log.Print("Warning: GitHub API returned nil user")
+		return
+	}
+
+	app.currentUser = user
+	// Log if we're using a different target user (sanitized)
+	if app.targetUser != "" && app.targetUser != user.GetLogin() {
+		log.Printf("Querying PRs for user '%s' instead of authenticated user", sanitizeForLog(app.targetUser))
+	}
 }
 
 func main() {
@@ -193,40 +240,13 @@ func main() {
 	log.Println("Initializing GitHub clients...")
 	err = app.initClients(ctx)
 	if err != nil {
-		log.Fatalf("Failed to initialize clients: %v", err)
+		log.Printf("Warning: Failed to initialize clients: %v", err)
+		app.authError = err.Error()
+		// Continue running with auth error - will show error in UI
 	}
 
-	log.Println("Loading current user...")
-	var user *github.User
-	err = retry.Do(func() error {
-		var retryErr error
-		user, _, retryErr = app.client.Users.Get(ctx, "")
-		if retryErr != nil {
-			log.Printf("GitHub Users.Get failed (will retry): %v", retryErr)
-			return retryErr
-		}
-		return nil
-	},
-		retry.Attempts(maxRetries),
-		retry.DelayType(retry.BackOffDelay),
-		retry.MaxDelay(maxRetryDelay),
-		retry.OnRetry(func(n uint, err error) {
-			log.Printf("GitHub Users.Get retry %d/%d: %v", n+1, maxRetries, err)
-		}),
-		retry.Context(ctx),
-	)
-	if err != nil {
-		log.Fatalf("Failed to load current user after %d retries: %v", maxRetries, err)
-	}
-	if user == nil {
-		log.Fatal("GitHub API returned nil user")
-	}
-	app.currentUser = user
-
-	// Log if we're using a different target user (sanitized)
-	if app.targetUser != "" && app.targetUser != user.GetLogin() {
-		log.Printf("Querying PRs for user '%s' instead of authenticated user", sanitizeForLog(app.targetUser))
-	}
+	// Load current user if we have a client
+	loadCurrentUser(ctx, app)
 
 	log.Println("Starting systray...")
 	// Create a cancellable context for the application
@@ -242,16 +262,8 @@ func main() {
 
 func (app *App) onReady(ctx context.Context) {
 	log.Println("System tray ready")
-	systray.SetTitle("Loading PRs...")
 
-	// Set tooltip based on whether we're using a custom user
-	tooltip := "GitHub PR Monitor"
-	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("GitHub PR Monitor - @%s", app.targetUser)
-	}
-	systray.SetTooltip(tooltip)
-
-	// Set up click handlers
+	// Set up click handlers first (needed for both success and error states)
 	systray.SetOnClick(func(menu systray.IMenu) {
 		log.Println("Icon clicked")
 		if menu != nil {
@@ -269,6 +281,26 @@ func (app *App) onReady(ctx context.Context) {
 			}
 		}
 	})
+
+	// Check if we have an auth error
+	if app.authError != "" {
+		systray.SetTitle("⚠️")
+		systray.SetTooltip("GitHub PR Monitor - Authentication Error")
+		// Create initial error menu
+		app.rebuildMenu(ctx)
+		// Clean old cache on startup
+		app.cleanupOldCache()
+		return
+	}
+
+	systray.SetTitle("Loading PRs...")
+
+	// Set tooltip based on whether we're using a custom user
+	tooltip := "GitHub PR Monitor"
+	if app.targetUser != "" {
+		tooltip = fmt.Sprintf("GitHub PR Monitor - @%s", app.targetUser)
+	}
+	systray.SetTooltip(tooltip)
 
 	// Clean old cache on startup
 	app.cleanupOldCache()
