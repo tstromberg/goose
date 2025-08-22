@@ -216,10 +216,21 @@ type prResult struct {
 // It returns GitHub data immediately and starts Turn API queries in the background (when waitForTurn=false),
 // or waits for Turn data to complete (when waitForTurn=true).
 func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incoming []PR, outgoing []PR, _ error) {
+	// Check if we have a client
+	if app.client == nil {
+		return nil, nil, fmt.Errorf("no GitHub client available: %s", app.authError)
+	}
+
 	// Use targetUser if specified, otherwise use authenticated user
-	user := app.currentUser.GetLogin()
+	user := ""
+	if app.currentUser != nil {
+		user = app.currentUser.GetLogin()
+	}
 	if app.targetUser != "" {
 		user = app.targetUser
+	}
+	if user == "" {
+		return nil, nil, errors.New("no user specified and current user not loaded")
 	}
 
 	const perPage = 100

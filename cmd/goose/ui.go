@@ -226,6 +226,48 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Clear all existing menu items
 	systray.ResetMenu()
 
+	// Check for auth error first
+	if app.authError != "" {
+		// Show authentication error message
+		errorTitle := systray.AddMenuItem("⚠️ Authentication Error", "")
+		errorTitle.Disable()
+
+		systray.AddSeparator()
+
+		// Add error details
+		errorMsg := systray.AddMenuItem(app.authError, "Click to see setup instructions")
+		errorMsg.Click(func() {
+			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login"); err != nil {
+				log.Printf("failed to open setup instructions: %v", err)
+			}
+		})
+
+		systray.AddSeparator()
+
+		// Add setup instructions
+		setupInstr := systray.AddMenuItem("To fix this issue:", "")
+		setupInstr.Disable()
+
+		option1 := systray.AddMenuItem("1. Install GitHub CLI: brew install gh", "")
+		option1.Disable()
+
+		option2 := systray.AddMenuItem("2. Run: gh auth login", "")
+		option2.Disable()
+
+		option3 := systray.AddMenuItem("3. Or set GITHUB_TOKEN environment variable", "")
+		option3.Disable()
+
+		systray.AddSeparator()
+
+		// Add quit option
+		quitItem := systray.AddMenuItem("Quit", "")
+		quitItem.Click(func() {
+			systray.Quit()
+		})
+
+		return
+	}
+
 	// Update tray title
 	app.setTrayTitle()
 
