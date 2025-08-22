@@ -59,61 +59,75 @@ func (*App) token(ctx context.Context) (string, error) {
 		log.Println("Using GitHub token from GITHUB_TOKEN environment variable")
 		return token, nil
 	}
-	// Only check absolute paths for security - never use PATH
-	var trustedPaths []string
-	switch runtime.GOOS {
-	case "windows":
-		trustedPaths = []string{
-			`C:\Program Files\GitHub CLI\gh.exe`,
-			`C:\Program Files (x86)\GitHub CLI\gh.exe`,
-			filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "gh", "gh.exe"),
-			filepath.Join(os.Getenv("LOCALAPPDATA"), "GitHub CLI", "gh.exe"),
+	// Try to find gh in PATH first
+	ghPath, err := exec.LookPath("gh")
+	if err == nil {
+		log.Printf("Found gh in PATH at: %s", ghPath)
+		// Resolve any symlinks to get the real path
+		if realPath, err := filepath.EvalSymlinks(ghPath); err == nil {
+			ghPath = realPath
+			log.Printf("Resolved to: %s", ghPath)
 		}
-	case "darwin":
-		trustedPaths = []string{
-			"/opt/homebrew/bin/gh", // Homebrew on Apple Silicon
-			"/usr/local/bin/gh",    // Homebrew on Intel / manual install
-			"/usr/bin/gh",          // System package managers
+	} else {
+		// Fall back to checking common installation paths
+		log.Print("gh not found in PATH, checking common locations...")
+		var commonPaths []string
+		switch runtime.GOOS {
+		case "windows":
+			commonPaths = []string{
+				`C:\Program Files\GitHub CLI\gh.exe`,
+				`C:\Program Files (x86)\GitHub CLI\gh.exe`,
+				filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "gh", "gh.exe"),
+				filepath.Join(os.Getenv("LOCALAPPDATA"), "GitHub CLI", "gh.exe"),
+			}
+		case "darwin":
+			commonPaths = []string{
+				"/opt/homebrew/bin/gh",                 // Homebrew on Apple Silicon
+				"/usr/local/bin/gh",                    // Homebrew on Intel / manual install
+				"/usr/bin/gh",                          // System package managers
+				"/opt/local/bin/gh",                    // MacPorts
+				"/sw/bin/gh",                           // Fink
+				"/nix/var/nix/profiles/default/bin/gh", // Nix
+			}
+		case "linux":
+			homeDir := os.Getenv("HOME")
+			commonPaths = []string{
+				"/usr/local/bin/gh",                 // Manual install
+				"/usr/bin/gh",                       // System package managers (apt, dnf, etc)
+				"/home/linuxbrew/.linuxbrew/bin/gh", // Linuxbrew
+				"/snap/bin/gh",                      // Snap package
+				"/run/current-system/sw/bin/gh",     // NixOS
+				"/var/lib/flatpak/exports/bin/gh",   // Flatpak system
+				filepath.Join(homeDir, ".local", "share", "flatpak", "exports", "bin", "gh"), // Flatpak user
+				"/usr/local/go/bin/gh",                        // Go install
+				filepath.Join(homeDir, "go", "bin", "gh"),     // Go install user
+				filepath.Join(homeDir, ".local", "bin", "gh"), // pip/pipx install
+				"/opt/gh/bin/gh",                              // Custom installs
+			}
+		default:
+			// BSD and other Unix-like systems
+			commonPaths = []string{
+				"/usr/local/bin/gh",
+				"/usr/bin/gh",
+				"/usr/pkg/bin/gh",   // NetBSD pkgsrc
+				"/opt/local/bin/gh", // OpenBSD ports
+			}
 		}
-	case "linux":
-		trustedPaths = []string{
-			"/usr/local/bin/gh",                 // Manual install
-			"/usr/bin/gh",                       // System package managers
-			"/home/linuxbrew/.linuxbrew/bin/gh", // Linuxbrew
-			"/snap/bin/gh",                      // Snap package
-		}
-	default:
-		// BSD and other Unix-like systems
-		trustedPaths = []string{
-			"/usr/local/bin/gh",
-			"/usr/bin/gh",
-		}
-	}
 
-	var ghPath string
-	for _, path := range trustedPaths {
-		// Verify the file exists and is executable
-		if info, err := os.Stat(path); err == nil {
-			// Check if it's a regular file and executable
-			const executableMask = 0o111
-			if info.Mode().IsRegular() && info.Mode()&executableMask != 0 {
-				// Verify it's actually the gh binary by running version command
-				// Use timeout to prevent hanging
-				versionCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-				cmd := exec.CommandContext(versionCtx, path, "version")
-				output, err := cmd.Output()
-				cancel() // Call cancel immediately after command execution
-				if err == nil && strings.Contains(string(output), "gh version") {
-					log.Printf("Found and verified gh at: %s", path)
-					ghPath = path
-					break
-				}
+		for _, path := range commonPaths {
+			if path == "" {
+				continue // Skip empty paths from unset env vars
+			}
+			if _, err := os.Stat(path); err == nil {
+				log.Printf("Found gh at common location: %s", path)
+				ghPath = path
+				break
 			}
 		}
 	}
 
 	if ghPath == "" {
-		return "", errors.New("gh cli not found in trusted locations and GITHUB_TOKEN not set")
+		return "", errors.New("gh CLI not found in PATH or common locations, and GITHUB_TOKEN not set")
 	}
 
 	log.Printf("Executing command: %s auth token", ghPath)
