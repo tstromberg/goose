@@ -86,23 +86,21 @@ func (*App) token(ctx context.Context) (string, error) {
 				"/usr/local/bin/gh",                    // Homebrew on Intel / manual install
 				"/usr/bin/gh",                          // System package managers
 				"/opt/local/bin/gh",                    // MacPorts
-				"/sw/bin/gh",                           // Fink
-				"/nix/var/nix/profiles/default/bin/gh", // Nix
+				"/run/current-system/sw/bin/gh",        // Nix
+				"/nix/var/nix/profiles/default/bin/gh", // Nix fallback
 			}
 		case "linux":
 			homeDir := os.Getenv("HOME")
 			commonPaths = []string{
-				"/usr/local/bin/gh",                 // Manual install
-				"/usr/bin/gh",                       // System package managers (apt, dnf, etc)
-				"/home/linuxbrew/.linuxbrew/bin/gh", // Linuxbrew
-				"/snap/bin/gh",                      // Snap package
-				"/run/current-system/sw/bin/gh",     // NixOS
-				"/var/lib/flatpak/exports/bin/gh",   // Flatpak system
-				filepath.Join(homeDir, ".local", "share", "flatpak", "exports", "bin", "gh"), // Flatpak user
-				"/usr/local/go/bin/gh",                        // Go install
-				filepath.Join(homeDir, "go", "bin", "gh"),     // Go install user
-				filepath.Join(homeDir, ".local", "bin", "gh"), // pip/pipx install
-				"/opt/gh/bin/gh",                              // Custom installs
+				"/usr/local/bin/gh",                       // Manual install
+				"/usr/bin/gh",                             // System package managers (apt, dnf, etc)
+				"/home/linuxbrew/.linuxbrew/bin/gh",       // Linuxbrew
+				"/snap/bin/gh",                            // Snap package
+				"/run/current-system/sw/bin/gh",           // NixOS
+				"/var/lib/flatpak/exports/bin/gh",         // Flatpak system
+				"/usr/local/go/bin/gh",                    // Go install
+				filepath.Join(homeDir, "go", "bin", "gh"), // Go install user
+				"/opt/gh/bin/gh",                          // Custom installs
 			}
 		default:
 			// BSD and other Unix-like systems
