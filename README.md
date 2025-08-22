@@ -71,9 +71,10 @@ The Goose is part of the [codeGROOVE](https://codegroove.dev) developer accelera
 
 ## Privacy
 
-- Your GitHub token is never stored or logged
-- PR metadata cached for up to 20 days (performance)
-- No telemetry or external data collection
+- Your GitHub token is used to authenticate against GitHub and codeGROOVE's API for state-machine & natural-language processing
+- Your GitHub token is never stored or logged,
+- PR metadata may be locally or remotely cached for up to 20 days (performance)
+- No telemetry is collected
 
 ---
 

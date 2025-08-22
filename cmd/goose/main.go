@@ -11,11 +11,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/go-cmp/cmp"
 
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/energye/systray"
@@ -32,33 +31,17 @@ var (
 )
 
 const (
-	// Cache settings.
-	cacheTTL             = 2 * time.Hour
-	cacheCleanupInterval = 5 * 24 * time.Hour
-
-	// PR settings.
-	dailyInterval    = 24 * time.Hour
-	stalePRThreshold = 90 * dailyInterval
-	maxPRsToProcess  = 200 // Limit for performance
-
-	// Update interval settings.
-	minUpdateInterval     = 10 * time.Second
-	defaultUpdateInterval = 1 * time.Minute
-
-	// Retry settings for external API calls - exponential backoff with jitter up to 2 minutes.
-	maxRetryDelay = 2 * time.Minute
-	maxRetries    = 10 // Should reach 2 minutes with exponential backoff
-
-	// Failure thresholds.
-	minorFailureThreshold = 3
-	majorFailureThreshold = 10
-	panicFailureIncrement = 10
-
-	// Notification settings.
-	reminderInterval     = 24 * time.Hour
-	historyRetentionDays = 30
-
-	// Turn API settings.
+	cacheTTL                  = 2 * time.Hour
+	cacheCleanupInterval      = 5 * 24 * time.Hour
+	stalePRThreshold          = 90 * 24 * time.Hour
+	maxPRsToProcess           = 200
+	minUpdateInterval         = 10 * time.Second
+	defaultUpdateInterval     = 1 * time.Minute
+	maxRetryDelay             = 2 * time.Minute
+	maxRetries                = 10
+	minorFailureThreshold     = 3
+	majorFailureThreshold     = 10
+	panicFailureIncrement     = 10
 	turnAPITimeout            = 10 * time.Second
 	maxConcurrentTurnAPICalls = 10
 )
@@ -76,24 +59,6 @@ type PR struct {
 	NeedsReview       bool
 }
 
-// MenuState represents the current state of menu items for comparison.
-type MenuState struct {
-	IncomingItems []MenuItemState `json:"incoming"`
-	OutgoingItems []MenuItemState `json:"outgoing"`
-	HideStale     bool            `json:"hide_stale"`
-}
-
-// MenuItemState represents a single menu item's display state.
-type MenuItemState struct {
-	URL          string `json:"url"`
-	Title        string `json:"title"`
-	Repository   string `json:"repository"`
-	ActionReason string `json:"action_reason"`
-	Number       int    `json:"number"`
-	NeedsReview  bool   `json:"needs_review"`
-	IsBlocked    bool   `json:"is_blocked"`
-}
-
 // TurnResult represents a Turn API result to be applied later.
 type TurnResult struct {
 	URL          string
@@ -103,35 +68,28 @@ type TurnResult struct {
 	WasFromCache bool // Track if this result came from cache
 }
 
-// NotificationState tracks the last known state and notification time for a PR.
-type NotificationState struct {
-	LastNotified time.Time
-	WasBlocked   bool
-}
-
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
+	client              *github.Client
 	turnClient          *turn.Client
 	currentUser         *github.User
 	previousBlockedPRs  map[string]bool
-	notificationHistory map[string]NotificationState
-	client              *github.Client
-	lastMenuState       *MenuState
 	targetUser          string
 	cacheDir            string
 	authError           string
-	outgoing            []PR
-	pendingTurnResults  []TurnResult
 	incoming            []PR
-	consecutiveFailures int
+	outgoing            []PR
+	lastMenuTitles      []string
+	pendingTurnResults  []TurnResult
 	updateInterval      time.Duration
+	consecutiveFailures int
 	mu                  sync.RWMutex
-	initialLoadComplete bool
-	menuInitialized     bool
 	noCache             bool
 	hideStaleIncoming   bool
 	loadingTurnData     bool
+	menuInitialized     bool
+	initialLoadComplete bool
 	enableReminders     bool
 	enableAudioCues     bool
 }
@@ -222,16 +180,15 @@ func main() {
 	}
 
 	app := &App{
-		cacheDir:            cacheDir,
-		hideStaleIncoming:   true,
-		previousBlockedPRs:  make(map[string]bool),
-		notificationHistory: make(map[string]NotificationState),
-		targetUser:          targetUser,
-		noCache:             noCache,
-		updateInterval:      updateInterval,
-		pendingTurnResults:  make([]TurnResult, 0),
-		enableReminders:     true,
-		enableAudioCues:     true,
+		cacheDir:           cacheDir,
+		hideStaleIncoming:  true,
+		previousBlockedPRs: make(map[string]bool),
+		targetUser:         targetUser,
+		noCache:            noCache,
+		updateInterval:     updateInterval,
+		pendingTurnResults: make([]TurnResult, 0),
+		enableReminders:    true,
+		enableAudioCues:    true,
 	}
 
 	// Load saved settings
@@ -426,89 +383,39 @@ func (app *App) updatePRs(ctx context.Context) {
 	// Don't check for newly blocked PRs here - wait for Turn data
 	// Turn data will be applied asynchronously and will trigger the check
 
-	app.updateMenuIfChanged(ctx)
+	app.updateMenu(ctx)
 }
 
-// buildCurrentMenuState creates a MenuState representing the current menu items.
-func (app *App) buildCurrentMenuState() *MenuState {
-	// Apply the same filtering as the menu display (stale PR filtering)
-	staleThreshold := time.Now().Add(-stalePRThreshold)
-
-	filterStale := func(prs []PR) []PR {
-		if !app.hideStaleIncoming {
-			return prs
-		}
-		var filtered []PR
-		for i := range prs {
-			if prs[i].UpdatedAt.After(staleThreshold) {
-				filtered = append(filtered, prs[i])
-			}
-		}
-		return filtered
-	}
-
-	filteredIncoming := filterStale(app.incoming)
-	filteredOutgoing := filterStale(app.outgoing)
-
-	// Sort PRs the same way the menu does
-	incomingSorted := sortPRsBlockedFirst(filteredIncoming)
-	outgoingSorted := sortPRsBlockedFirst(filteredOutgoing)
-
-	// Build menu item states
-	incomingItems := make([]MenuItemState, len(incomingSorted))
-	for i := range incomingSorted {
-		incomingItems[i] = MenuItemState{
-			URL:          incomingSorted[i].URL,
-			Title:        incomingSorted[i].Title,
-			Repository:   incomingSorted[i].Repository,
-			Number:       incomingSorted[i].Number,
-			NeedsReview:  incomingSorted[i].NeedsReview,
-			IsBlocked:    false, // incoming PRs don't use IsBlocked
-			ActionReason: incomingSorted[i].ActionReason,
-		}
-	}
-
-	outgoingItems := make([]MenuItemState, len(outgoingSorted))
-	for i := range outgoingSorted {
-		outgoingItems[i] = MenuItemState{
-			URL:          outgoingSorted[i].URL,
-			Title:        outgoingSorted[i].Title,
-			Repository:   outgoingSorted[i].Repository,
-			Number:       outgoingSorted[i].Number,
-			NeedsReview:  outgoingSorted[i].NeedsReview,
-			IsBlocked:    outgoingSorted[i].IsBlocked,
-			ActionReason: outgoingSorted[i].ActionReason,
-		}
-	}
-
-	return &MenuState{
-		IncomingItems: incomingItems,
-		OutgoingItems: outgoingItems,
-		HideStale:     app.hideStaleIncoming,
-	}
-}
-
-// updateMenuIfChanged only rebuilds the menu if the PR data has actually changed.
-func (app *App) updateMenuIfChanged(ctx context.Context) {
+// updateMenu rebuilds the menu only when content actually changes.
+func (app *App) updateMenu(ctx context.Context) {
 	app.mu.RLock()
-	// Skip menu updates while Turn data is still loading to avoid excessive rebuilds
+	// Skip menu updates while Turn data is still loading
 	if app.loadingTurnData {
 		app.mu.RUnlock()
-		log.Print("[MENU] Skipping menu update - Turn data still loading")
 		return
 	}
-	currentMenuState := app.buildCurrentMenuState()
-	lastMenuState := app.lastMenuState
+
+	// Build current menu titles for comparison
+	var currentTitles []string
+	for i := range app.incoming {
+		currentTitles = append(currentTitles, fmt.Sprintf("IN:%s #%d", app.incoming[i].Repository, app.incoming[i].Number))
+	}
+	for i := range app.outgoing {
+		currentTitles = append(currentTitles, fmt.Sprintf("OUT:%s #%d", app.outgoing[i].Repository, app.outgoing[i].Number))
+	}
+
+	lastTitles := app.lastMenuTitles
 	app.mu.RUnlock()
 
-	// Only rebuild if menu changed
-	if lastMenuState != nil && cmp.Diff(lastMenuState, currentMenuState) == "" {
+	// Only rebuild if titles changed
+	if reflect.DeepEqual(lastTitles, currentTitles) {
 		return
 	}
 
 	app.mu.Lock()
-	app.lastMenuState = currentMenuState
+	app.lastMenuTitles = currentTitles
 	app.mu.Unlock()
+
 	app.rebuildMenu(ctx)
 }
 
@@ -572,7 +479,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.menuInitialized = true
 		// Menu initialization complete
 	} else {
-		app.updateMenuIfChanged(ctx)
+		app.updateMenu(ctx)
 	}
 
 	// Mark initial load as complete after first successful update
@@ -585,203 +492,68 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	app.checkForNewlyBlockedPRs(ctx)
 }
 
-// processPRNotifications handles notification logic for a single PR.
-func (app *App) processPRNotifications(
-	ctx context.Context,
-	pr PR,
-	isBlocked bool,
-	isIncoming bool,
-	notificationHistory map[string]NotificationState,
-	playedSound *bool,
-	now time.Time,
-	reminderInterval time.Duration,
-) {
-	prevState, hasHistory := notificationHistory[pr.URL]
-
-	// Inline notification decision logic
-	var shouldNotify bool
-	var notifyReason string
-	switch {
-	case !hasHistory && isBlocked:
-		shouldNotify = true
-		notifyReason = "newly blocked"
-	case !hasHistory:
-		shouldNotify = false
-		notifyReason = ""
-	case isBlocked && !prevState.WasBlocked:
-		shouldNotify = true
-		notifyReason = "became blocked"
-	case !isBlocked && prevState.WasBlocked:
-		shouldNotify = false
-		notifyReason = "unblocked"
-	case isBlocked && prevState.WasBlocked && app.enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
-		shouldNotify = true
-		notifyReason = "reminder"
-	default:
-		shouldNotify = false
-		notifyReason = ""
-	}
-
-	// Update state for unblocked PRs
-	if notifyReason == "unblocked" {
-		notificationHistory[pr.URL] = NotificationState{
-			LastNotified: prevState.LastNotified,
-			WasBlocked:   false,
-		}
-		return
-	}
-
-	if !shouldNotify || !isBlocked {
-		return
-	}
-
-	// Send notification
+// notifyWithSound sends a notification and plays sound only once per cycle.
+func (app *App) notifyWithSound(ctx context.Context, pr PR, isIncoming bool, playedSound *bool) {
 	var title, soundType string
 	if isIncoming {
 		title = "PR Blocked on You 🪿"
 		soundType = "honk"
-		if notifyReason == "reminder" {
-			log.Printf("[NOTIFY] Incoming PR reminder (24hr): %s #%d - %s (reason: %s)",
-				pr.Repository, pr.Number, pr.Title, pr.ActionReason)
-		} else {
-			log.Printf("[NOTIFY] Incoming PR notification (%s): %s #%d - %s (reason: %s)",
-				notifyReason, pr.Repository, pr.Number, pr.Title, pr.ActionReason)
-		}
 	} else {
 		title = "Your PR is Blocked 🚀"
 		soundType = "rocket"
-		if notifyReason == "reminder" {
-			log.Printf("[NOTIFY] Outgoing PR reminder (24hr): %s #%d - %s (reason: %s)",
-				pr.Repository, pr.Number, pr.Title, pr.ActionReason)
-		} else {
-			log.Printf("[NOTIFY] Outgoing PR notification (%s): %s #%d - %s (reason: %s)",
-				notifyReason, pr.Repository, pr.Number, pr.Title, pr.ActionReason)
-		}
 	}
 
 	message := fmt.Sprintf("%s #%d: %s", pr.Repository, pr.Number, pr.Title)
 	if err := beeep.Notify(title, message, ""); err != nil {
-		log.Printf("[NOTIFY] Failed to send desktop notification for %s: %v", pr.URL, err)
-	} else {
-		log.Printf("[NOTIFY] Desktop notification sent for %s", pr.URL)
-		notificationHistory[pr.URL] = NotificationState{
-			LastNotified: now,
-			WasBlocked:   true,
-		}
+		log.Printf("Failed to send notification for %s: %v", pr.URL, err)
 	}
 
-	// Play sound once per polling period
+	// Play sound only once per refresh cycle
 	if !*playedSound {
-		if notifyReason == "reminder" {
-			log.Printf("[SOUND] Playing %s sound for daily reminder", soundType)
-		}
 		app.playSound(ctx, soundType)
 		*playedSound = true
 	}
 }
 
-// checkForNewlyBlockedPRs checks for PRs that have become blocked and sends notifications.
+// checkForNewlyBlockedPRs sends notifications for blocked PRs.
 func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
-	app.mu.Lock()
-	notificationHistory := app.notificationHistory
-	if notificationHistory == nil {
-		notificationHistory = make(map[string]NotificationState)
-		app.notificationHistory = notificationHistory
-	}
-	initialLoadComplete := app.initialLoadComplete
-	hideStaleIncoming := app.hideStaleIncoming
-	incoming := make([]PR, len(app.incoming))
-	copy(incoming, app.incoming)
-	outgoing := make([]PR, len(app.outgoing))
-	copy(outgoing, app.outgoing)
-	hasValidData := len(incoming) > 0 || len(outgoing) > 0
-	app.mu.Unlock()
+	app.mu.RLock()
+	incoming := app.incoming
+	outgoing := app.outgoing
+	previousBlocked := app.previousBlockedPRs
+	app.mu.RUnlock()
 
-	// Skip if this looks like a transient GitHub API failure
-	if !hasValidData && initialLoadComplete {
-		log.Print("[NOTIFY] Skipping notification check - no PR data (likely transient API failure)")
-		return
-	}
+	currentBlocked := make(map[string]bool)
+	playedHonk := false
+	playedJet := false
 
-	// Calculate stale threshold
-	now := time.Now()
-	staleThreshold := now.Add(-stalePRThreshold)
-
-	// Use reminder interval constant from package level
-
-	currentBlockedPRs := make(map[string]bool)
-	playedIncomingSound := false
-	playedOutgoingSound := false
-
-	// Check incoming PRs for state changes
-	for idx := range incoming {
-		pr := incoming[idx]
-		isBlocked := pr.NeedsReview
-
-		if isBlocked {
-			currentBlockedPRs[pr.URL] = true
-		}
-
-		// Skip stale PRs for notifications if hideStaleIncoming is enabled
-		if hideStaleIncoming && pr.UpdatedAt.Before(staleThreshold) {
-			continue
-		}
-
-		app.processPRNotifications(ctx, pr, isBlocked, true, notificationHistory,
-			&playedIncomingSound, now, reminderInterval)
-	}
-
-	// Check outgoing PRs for state changes
-	for idx := range outgoing {
-		pr := outgoing[idx]
-		isBlocked := pr.IsBlocked
-
-		if isBlocked {
-			currentBlockedPRs[pr.URL] = true
-		}
-
-		// Skip stale PRs for notifications if hideStaleIncoming is enabled
-		if hideStaleIncoming && pr.UpdatedAt.Before(staleThreshold) {
-			continue
-		}
-
-		// If we already played the incoming sound (goose/honk), wait 2 seconds before playing outgoing sound (jet)
-		if playedIncomingSound && !playedOutgoingSound {
-			// Check if this PR would trigger a sound
-			prevState, hasHistory := notificationHistory[pr.URL]
-			var wouldPlaySound bool
-			switch {
-			case !hasHistory && isBlocked:
-				wouldPlaySound = true
-			case hasHistory && isBlocked && !prevState.WasBlocked:
-				wouldPlaySound = true
-			case hasHistory && isBlocked && prevState.WasBlocked && app.enableReminders && time.Since(prevState.LastNotified) > reminderInterval:
-				wouldPlaySound = true
-			default:
-				wouldPlaySound = false
-			}
-
-			if wouldPlaySound {
-				log.Println("[SOUND] Delaying 2 seconds between goose and jet sounds")
-				time.Sleep(2 * time.Second)
+	// Check incoming PRs
+	for i := range incoming {
+		if incoming[i].NeedsReview {
+			currentBlocked[incoming[i].URL] = true
+			// Notify if newly blocked
+			if !previousBlocked[incoming[i].URL] {
+				app.notifyWithSound(ctx, incoming[i], true, &playedHonk)
 			}
 		}
-
-		app.processPRNotifications(ctx, pr, isBlocked, false, notificationHistory,
-			&playedOutgoingSound, now, reminderInterval)
 	}
 
-	// Clean up old entries from notification history (older than 7 days)
-	const historyRetentionDays = 7
-	for url, state := range notificationHistory {
-		if time.Since(state.LastNotified) > historyRetentionDays*24*time.Hour {
-			delete(notificationHistory, url)
+	// Check outgoing PRs
+	for i := range outgoing {
+		if outgoing[i].IsBlocked {
+			currentBlocked[outgoing[i].URL] = true
+			// Notify if newly blocked
+			if !previousBlocked[outgoing[i].URL] {
+				// Add delay if we already played honk sound
+				if playedHonk && !playedJet {
+					time.Sleep(2 * time.Second)
+				}
+				app.notifyWithSound(ctx, outgoing[i], false, &playedJet)
+			}
 		}
 	}
 
-	// Update the notification history
 	app.mu.Lock()
-	app.notificationHistory = notificationHistory
-	app.previousBlockedPRs = currentBlockedPRs
+	app.previousBlockedPRs = currentBlocked
 	app.mu.Unlock()
 }

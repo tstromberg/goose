@@ -621,15 +621,17 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 		}
 	}
 
-	// Check for newly blocked PRs after Turn data is applied
-	app.checkForNewlyBlockedPRs(ctx)
+	// Only check for newly blocked PRs if there were actual changes
+	if actualChanges > 0 {
+		app.checkForNewlyBlockedPRs(ctx)
+	}
 
 	// Update tray title and menu with final Turn data if menu is already initialized
 	app.setTrayTitle()
 	if app.menuInitialized {
 		// Only trigger menu update if PR data actually changed
 		if actualChanges > 0 {
-			app.updateMenuIfChanged(ctx)
+			app.updateMenu(ctx)
 		}
 	}
 }
