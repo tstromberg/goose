@@ -568,15 +568,26 @@ func (app *App) notifyWithSound(ctx context.Context, pr PR, isIncoming bool, pla
 
 // checkForNewlyBlockedPRs sends notifications for blocked PRs.
 func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
-	app.mu.RLock()
-	incoming := app.incoming
-	outgoing := app.outgoing
+	// Check for context cancellation early
+	select {
+	case <-ctx.Done():
+		log.Print("[BLOCKED] Context cancelled, skipping newly blocked PR check")
+		return
+	default:
+	}
+
+	app.mu.Lock()
+	// Make deep copies to work with while holding the lock
+	incoming := make([]PR, len(app.incoming))
+	copy(incoming, app.incoming)
+	outgoing := make([]PR, len(app.outgoing))
+	copy(outgoing, app.outgoing)
 	previousBlocked := app.previousBlockedPRs
 	blockedTimes := app.blockedPRTimes
 	autoBrowserEnabled := app.enableAutoBrowser
 	startTime := app.startTime
 	hideStaleIncoming := app.hideStaleIncoming
-	app.mu.RUnlock()
+	app.mu.Unlock()
 
 	currentBlocked := make(map[string]bool)
 	newBlockedTimes := make(map[string]time.Time)
@@ -649,17 +660,20 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 		}
 	}
 
+	// Update state with a lock
 	app.mu.Lock()
 	app.previousBlockedPRs = currentBlocked
 	app.blockedPRTimes = newBlockedTimes
 	// Update the PR lists with FirstBlockedAt times
 	app.incoming = incoming
 	app.outgoing = outgoing
+	menuInitialized := app.menuInitialized
 	app.mu.Unlock()
 
-	// Update tray title and menu when called from main.go (not from github.go)
-	// This ensures party popper shows for newly blocked PRs
-	if app.menuInitialized {
+	// Update UI after releasing the lock
+	// Only update if there are newly blocked PRs
+	if menuInitialized && len(currentBlocked) > len(previousBlocked) {
+		log.Print("[BLOCKED] Updating UI for newly blocked PRs")
 		app.setTrayTitle()
 		app.updateMenu(ctx)
 	}
