@@ -41,6 +41,8 @@ git clone https://github.com/ready-to-review/goose.git
 cd goose && make run
 ```
 
+`make run` will cause the goose to implant itself into `/Applications/Review Goose.app` for future use. To be persistently annoyed by the goose every time you start your computer, click the `Start at Login` menu item.
+
 ### Option 2: Using a fine-grained access token
 
 If you want more control over which repositories the goose can access, you can use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with the following permissions:
