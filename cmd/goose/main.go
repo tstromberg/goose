@@ -597,6 +597,8 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 				// Newly blocked PR
 				newBlockedTimes[incoming[i].URL] = now
 				incoming[i].FirstBlockedAt = now
+				log.Printf("[BLOCKED] Setting FirstBlockedAt for incoming PR: %s #%d at %v",
+					incoming[i].Repository, incoming[i].Number, now)
 
 				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
 				isStale := incoming[i].UpdatedAt.Before(staleThreshold)
@@ -625,6 +627,8 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 				// Newly blocked PR
 				newBlockedTimes[outgoing[i].URL] = now
 				outgoing[i].FirstBlockedAt = now
+				log.Printf("[BLOCKED] Setting FirstBlockedAt for outgoing PR: %s #%d at %v",
+					outgoing[i].Repository, outgoing[i].Number, now)
 
 				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
 				isStale := outgoing[i].UpdatedAt.Before(staleThreshold)
@@ -652,4 +656,11 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	app.incoming = incoming
 	app.outgoing = outgoing
 	app.mu.Unlock()
+
+	// Update tray title and menu when called from main.go (not from github.go)
+	// This ensures party popper shows for newly blocked PRs
+	if app.menuInitialized {
+		app.setTrayTitle()
+		app.updateMenu(ctx)
+	}
 }
