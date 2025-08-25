@@ -198,7 +198,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get cache directory: %v", err)
 	}
-	cacheDir = filepath.Join(cacheDir, "ready-to-review")
+	cacheDir = filepath.Join(cacheDir, "review-goose")
 	const dirPerm = 0o700 // Only owner can access cache directory
 	if err := os.MkdirAll(cacheDir, dirPerm); err != nil {
 		log.Fatalf("Failed to create cache directory: %v", err)
