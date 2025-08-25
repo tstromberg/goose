@@ -1,5 +1,5 @@
-APP_NAME = ready-to-review
-BUNDLE_NAME = Ready to Review
+APP_NAME = review-goose
+BUNDLE_NAME = Review Goose
 VERSION = 1.0.0
 BUNDLE_VERSION = 1
 BUNDLE_ID = dev.codegroove.r2r
@@ -123,7 +123,7 @@ app-bundle: out build-darwin install-appify
 
 	# Fix the Info.plist
 	@echo "Fixing Info.plist..."
-	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Ready\\ to\\ Review" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Review\\ Goose" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :LSUIElement true" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string en" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
@@ -158,6 +158,8 @@ install-darwin: app-bundle
 	@echo "Installing on macOS..."
 	@echo "Copying $(BUNDLE_NAME).app to /Applications..."
 	@rm -rf "/Applications/$(BUNDLE_NAME).app"
+	# old name
+	@rm -rf "/Applications/Ready to Review.app"
 	@cp -R "out/$(BUNDLE_NAME).app" "/Applications/"
 	@echo "Installation complete! $(BUNDLE_NAME) has been installed to /Applications"
 

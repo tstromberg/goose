@@ -21,7 +21,7 @@ func settingsDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(configDir, "ready-to-review"), nil
+	return filepath.Join(configDir, "review-goose"), nil
 }
 
 // loadSettings loads settings from disk or returns defaults.
