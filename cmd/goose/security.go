@@ -29,6 +29,11 @@ var (
 	// New tokens: ghp_ (personal), ghs_ (server), ghr_ (refresh), gho_ (OAuth), ghu_ (user-to-server) followed by base62 chars.
 	// Fine-grained tokens: github_pat_ followed by base62 chars.
 	githubTokenRegex = regexp.MustCompile(`^[a-f0-9]{40}$|^gh[psoru]_[A-Za-z0-9]{36,251}$|^github_pat_[A-Za-z0-9]{82}$`)
+
+	// githubPRURLRegex validates strict GitHub PR URL format for auto-opening.
+	// Must match: https://github.com/{owner}/{repo}/pull/{number}
+	// Owner and repo follow GitHub naming rules, number is digits only.
+	githubPRURLRegex = regexp.MustCompile(`^https://github\.com/[a-zA-Z0-9][a-zA-Z0-9-]{0,38}/[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}/pull/[1-9][0-9]{0,9}$`)
 )
 
 // validateGitHubUsername validates a GitHub username.
@@ -111,6 +116,57 @@ func validateURL(rawURL string) error {
 	// Check for URL length limits
 	if len(rawURL) > maxURLLength {
 		return errors.New("URL too long")
+	}
+
+	return nil
+}
+
+// validateGitHubPRURL performs strict validation for GitHub PR URLs used in auto-opening.
+// This ensures the URL follows the exact pattern: https://github.com/{owner}/{repo}/pull/{number}
+// with no additional path segments, fragments, or suspicious characters.
+// The URL may optionally have ?goose=1 parameter which we add for tracking.
+func validateGitHubPRURL(rawURL string) error {
+	// First do basic URL validation
+	if err := validateURL(rawURL); err != nil {
+		return err
+	}
+
+	// Strip the ?goose=1 parameter if present for pattern validation
+	urlToValidate := rawURL
+	if strings.HasSuffix(rawURL, "?goose=1") {
+		urlToValidate = strings.TrimSuffix(rawURL, "?goose=1")
+	}
+
+	// Check against strict GitHub PR URL pattern
+	if !githubPRURLRegex.MatchString(urlToValidate) {
+		return fmt.Errorf("URL does not match GitHub PR pattern: %s", urlToValidate)
+	}
+
+	// Additional security checks
+	// Reject URLs with @ (potential credential injection)
+	if strings.Contains(rawURL, "@") {
+		return errors.New("URL contains @ character")
+	}
+
+	// Reject URLs with URL encoding (could hide malicious content)  
+	// Exception: %3D which is = in URL encoding, only as part of ?goose=1
+	if strings.Contains(rawURL, "%") && !strings.HasSuffix(rawURL, "?goose%3D1") {
+		return errors.New("URL contains encoded characters")
+	}
+
+	// Reject URLs with fragments
+	if strings.Contains(rawURL, "#") {
+		return errors.New("URL contains fragments")
+	}
+
+	// Allow only ?goose=1 query parameter, nothing else
+	if strings.Contains(rawURL, "?") && !strings.HasSuffix(rawURL, "?goose=1") && !strings.HasSuffix(rawURL, "?goose%3D1") {
+		return errors.New("URL contains unexpected query parameters")
+	}
+
+	// Reject URLs with double slashes (except after https:)
+	if strings.Contains(rawURL[8:], "//") {
+		return errors.New("URL contains double slashes")
 	}
 
 	return nil

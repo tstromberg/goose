@@ -10,13 +10,13 @@ import (
 
 // Settings represents persistent user settings.
 type Settings struct {
-	EnableAudioCues bool `json:"enable_audio_cues"`
-	EnableReminders bool `json:"enable_reminders"`
-	HideStale       bool `json:"hide_stale"`
+	EnableAudioCues   bool `json:"enable_audio_cues"`
+	HideStale         bool `json:"hide_stale"`
+	EnableAutoBrowser bool `json:"enable_auto_browser"`
 }
 
-// getSettingsDir returns the configuration directory for settings.
-func getSettingsDir() (string, error) {
+// settingsDir returns the configuration directory for settings.
+func settingsDir() (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
@@ -26,13 +26,13 @@ func getSettingsDir() (string, error) {
 
 // loadSettings loads settings from disk or returns defaults.
 func (app *App) loadSettings() {
-	settingsDir, err := getSettingsDir()
+	settingsDir, err := settingsDir()
 	if err != nil {
 		log.Printf("Failed to get settings directory: %v", err)
 		// Use defaults
 		app.enableAudioCues = true
-		app.enableReminders = true
 		app.hideStaleIncoming = true
+		app.enableAutoBrowser = false
 		return
 	}
 
@@ -45,8 +45,8 @@ func (app *App) loadSettings() {
 		}
 		// Use defaults
 		app.enableAudioCues = true
-		app.enableReminders = true
 		app.hideStaleIncoming = true
+		app.enableAutoBrowser = false
 		return
 	}
 
@@ -55,21 +55,21 @@ func (app *App) loadSettings() {
 		log.Printf("Failed to parse settings: %v", err)
 		// Use defaults
 		app.enableAudioCues = true
-		app.enableReminders = true
 		app.hideStaleIncoming = true
+		app.enableAutoBrowser = false
 		return
 	}
 
 	app.enableAudioCues = settings.EnableAudioCues
-	app.enableReminders = settings.EnableReminders
 	app.hideStaleIncoming = settings.HideStale
-	log.Printf("Loaded settings: audio_cues=%v, reminders=%v, hide_stale=%v",
-		app.enableAudioCues, app.enableReminders, app.hideStaleIncoming)
+	app.enableAutoBrowser = settings.EnableAutoBrowser
+	log.Printf("Loaded settings: audio_cues=%v, hide_stale=%v, auto_browser=%v",
+		app.enableAudioCues, app.hideStaleIncoming, app.enableAutoBrowser)
 }
 
 // saveSettings saves current settings to disk.
 func (app *App) saveSettings() {
-	settingsDir, err := getSettingsDir()
+	settingsDir, err := settingsDir()
 	if err != nil {
 		log.Printf("Failed to get settings directory: %v", err)
 		return
@@ -77,9 +77,9 @@ func (app *App) saveSettings() {
 
 	app.mu.RLock()
 	settings := Settings{
-		EnableAudioCues: app.enableAudioCues,
-		EnableReminders: app.enableReminders,
-		HideStale:       app.hideStaleIncoming,
+		EnableAudioCues:   app.enableAudioCues,
+		HideStale:         app.hideStaleIncoming,
+		EnableAutoBrowser: app.enableAutoBrowser,
 	}
 	app.mu.RUnlock()
 
@@ -102,6 +102,6 @@ func (app *App) saveSettings() {
 		return
 	}
 
-	log.Printf("Saved settings: audio_cues=%v, reminders=%v, hide_stale=%v",
-		settings.EnableAudioCues, settings.EnableReminders, settings.HideStale)
+	log.Printf("Saved settings: audio_cues=%v, hide_stale=%v, auto_browser=%v",
+		settings.EnableAudioCues, settings.HideStale, settings.EnableAutoBrowser)
 }

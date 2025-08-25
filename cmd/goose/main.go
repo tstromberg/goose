@@ -44,6 +44,7 @@ const (
 	panicFailureIncrement     = 10
 	turnAPITimeout            = 10 * time.Second
 	maxConcurrentTurnAPICalls = 10
+	defaultMaxBrowserOpensDay = 20
 )
 
 // PR represents a pull request with metadata.
@@ -90,8 +91,10 @@ type App struct {
 	loadingTurnData     bool
 	menuInitialized     bool
 	initialLoadComplete bool
-	enableReminders     bool
 	enableAudioCues     bool
+	enableAutoBrowser   bool
+	browserRateLimiter  *BrowserRateLimiter
+	startTime           time.Time
 }
 
 func loadCurrentUser(ctx context.Context, app *App) {
@@ -145,9 +148,15 @@ func main() {
 	var targetUser string
 	var noCache bool
 	var updateInterval time.Duration
+	var browserOpenDelay time.Duration
+	var maxBrowserOpensMinute int
+	var maxBrowserOpensDay int
 	flag.StringVar(&targetUser, "user", "", "GitHub user to query PRs for (defaults to authenticated user)")
 	flag.BoolVar(&noCache, "no-cache", false, "Bypass cache for debugging")
 	flag.DurationVar(&updateInterval, "interval", defaultUpdateInterval, "Update interval (e.g. 30s, 1m, 5m)")
+	flag.DurationVar(&browserOpenDelay, "browser-delay", 1*time.Minute, "Minimum delay before opening PRs in browser after startup")
+	flag.IntVar(&maxBrowserOpensMinute, "browser-max-per-minute", 2, "Maximum browser windows to open per minute")
+	flag.IntVar(&maxBrowserOpensDay, "browser-max-per-day", defaultMaxBrowserOpensDay, "Maximum browser windows to open per day")
 	flag.Parse()
 
 	// Validate target user if provided
@@ -163,9 +172,25 @@ func main() {
 		updateInterval = minUpdateInterval
 	}
 
+	// Validate browser rate limit parameters
+	if maxBrowserOpensMinute < 0 {
+		log.Printf("Invalid browser-max-per-minute %d, using default of 2", maxBrowserOpensMinute)
+		maxBrowserOpensMinute = 2
+	}
+	if maxBrowserOpensDay < 0 {
+		log.Printf("Invalid browser-max-per-day %d, using default of %d", maxBrowserOpensDay, defaultMaxBrowserOpensDay)
+		maxBrowserOpensDay = defaultMaxBrowserOpensDay
+	}
+	if browserOpenDelay < 0 {
+		log.Printf("Invalid browser-delay %v, using default of 1 minute", browserOpenDelay)
+		browserOpenDelay = 1 * time.Minute
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Starting GitHub PR Monitor (version=%s, commit=%s, date=%s)", version, commit, date)
 	log.Printf("Configuration: update_interval=%v, max_retries=%d, max_delay=%v", updateInterval, maxRetries, maxRetryDelay)
+	log.Printf("Browser auto-open: startup_delay=%v, max_per_minute=%d, max_per_day=%d",
+		browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay)
 
 	ctx := context.Background()
 
@@ -187,8 +212,10 @@ func main() {
 		noCache:            noCache,
 		updateInterval:     updateInterval,
 		pendingTurnResults: make([]TurnResult, 0),
-		enableReminders:    true,
 		enableAudioCues:    true,
+		enableAutoBrowser:  false, // Default to false for safety
+		browserRateLimiter: NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
+		startTime:          time.Now(),
 	}
 
 	// Load saved settings
@@ -492,6 +519,26 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	app.checkForNewlyBlockedPRs(ctx)
 }
 
+// tryAutoOpenPR attempts to open a PR in the browser if enabled and rate limits allow.
+func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled bool, startTime time.Time) {
+	if !autoBrowserEnabled {
+		return
+	}
+
+	if app.browserRateLimiter.CanOpen(startTime, pr.URL) {
+		log.Printf("[BROWSER] Auto-opening newly blocked PR: %s #%d - %s",
+			pr.Repository, pr.Number, pr.URL)
+		// Use strict validation for auto-opened URLs
+		if err := openURLAutoStrict(ctx, pr.URL); err != nil {
+			log.Printf("[BROWSER] Failed to auto-open PR %s: %v", pr.URL, err)
+		} else {
+			app.browserRateLimiter.RecordOpen(pr.URL)
+			log.Printf("[BROWSER] Successfully opened PR %s #%d in browser",
+				pr.Repository, pr.Number)
+		}
+	}
+}
+
 // notifyWithSound sends a notification and plays sound only once per cycle.
 func (app *App) notifyWithSound(ctx context.Context, pr PR, isIncoming bool, playedSound *bool) {
 	var title, soundType string
@@ -521,6 +568,8 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	incoming := app.incoming
 	outgoing := app.outgoing
 	previousBlocked := app.previousBlockedPRs
+	autoBrowserEnabled := app.enableAutoBrowser
+	startTime := app.startTime
 	app.mu.RUnlock()
 
 	currentBlocked := make(map[string]bool)
@@ -534,6 +583,7 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 			// Notify if newly blocked
 			if !previousBlocked[incoming[i].URL] {
 				app.notifyWithSound(ctx, incoming[i], true, &playedHonk)
+				app.tryAutoOpenPR(ctx, incoming[i], autoBrowserEnabled, startTime)
 			}
 		}
 	}
@@ -549,6 +599,7 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 					time.Sleep(2 * time.Second)
 				}
 				app.notifyWithSound(ctx, outgoing[i], false, &playedJet)
+				app.tryAutoOpenPR(ctx, outgoing[i], autoBrowserEnabled, startTime)
 			}
 		}
 	}

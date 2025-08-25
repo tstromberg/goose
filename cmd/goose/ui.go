@@ -15,6 +15,18 @@ import (
 	"github.com/energye/systray"
 )
 
+// openURLAutoStrict safely opens a URL in the default browser with strict validation for auto-opening.
+// This function is used for auto-opening PRs and enforces stricter URL patterns.
+func openURLAutoStrict(ctx context.Context, rawURL string) error {
+	// Validate against strict GitHub PR URL pattern
+	if err := validateGitHubPRURL(rawURL); err != nil {
+		return fmt.Errorf("strict validation failed: %w", err)
+	}
+
+	// Use the regular openURL after strict validation passes
+	return openURL(ctx, rawURL)
+}
+
 // openURL safely opens a URL in the default browser after validation.
 func openURL(ctx context.Context, rawURL string) error {
 	// Parse and validate the URL
@@ -39,6 +51,14 @@ func openURL(ctx context.Context, rawURL string) error {
 
 	if u.User != nil {
 		return errors.New("URLs with user info are not allowed")
+	}
+
+	// Add goose=1 parameter to track source for GitHub and dash URLs
+	if u.Host == "github.com" || u.Host == "www.github.com" || u.Host == "dash.ready-to-review.dev" {
+		q := u.Query()
+		q.Set("goose", "1")
+		u.RawQuery = q.Encode()
+		rawURL = u.String()
 	}
 
 	// Execute the open command based on OS
@@ -350,32 +370,6 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		app.rebuildMenu(ctx)
 	})
 
-	// Daily reminders
-	// Add 'Daily reminders' option
-	reminderItem := systray.AddMenuItem("Daily reminders", "Send reminder notifications for blocked PRs every 24 hours")
-	app.mu.RLock()
-	if app.enableReminders {
-		reminderItem.Check()
-	}
-	app.mu.RUnlock()
-	reminderItem.Click(func() {
-		app.mu.Lock()
-		app.enableReminders = !app.enableReminders
-		enabled := app.enableReminders
-		app.mu.Unlock()
-
-		if enabled {
-			reminderItem.Check()
-			log.Println("[SETTINGS] Daily reminders enabled")
-		} else {
-			reminderItem.Uncheck()
-			log.Println("[SETTINGS] Daily reminders disabled")
-		}
-
-		// Save settings to disk
-		app.saveSettings()
-	})
-
 	// Add login item option (macOS only)
 	addLoginItemUI(ctx, app)
 
@@ -399,6 +393,36 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		} else {
 			audioItem.Uncheck()
 			log.Println("[SETTINGS] Audio cues disabled")
+		}
+
+		// Save settings to disk
+		app.saveSettings()
+	})
+
+	// Auto-open blocked PRs in browser
+	// Add 'Auto-open PRs' option
+	autoOpenItem := systray.AddMenuItem("Auto-open incoming PRs", "Automatically open newly blocked PRs in browser (rate limited)")
+	app.mu.RLock()
+	if app.enableAutoBrowser {
+		autoOpenItem.Check()
+	}
+	app.mu.RUnlock()
+	autoOpenItem.Click(func() {
+		app.mu.Lock()
+		app.enableAutoBrowser = !app.enableAutoBrowser
+		enabled := app.enableAutoBrowser
+		// Reset rate limiter when toggling the feature
+		if !enabled {
+			app.browserRateLimiter.Reset()
+		}
+		app.mu.Unlock()
+
+		if enabled {
+			autoOpenItem.Check()
+			log.Println("[SETTINGS] Auto-open blocked PRs enabled")
+		} else {
+			autoOpenItem.Uncheck()
+			log.Println("[SETTINGS] Auto-open blocked PRs disabled")
 		}
 
 		// Save settings to disk

@@ -18,6 +18,7 @@ Lives in your menubar like a tiny waterfowl of productivity shame, watching your
 - **✈️ Jet sounds** when your own PR is ready for the next stage
 - **🧠 Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
 - **⭐ Auto-start** on login (macOS)
+- **🔔 Auto-open** incoming PRs in your browser (off by default, rate-limited)
 
 You can also visit the web-based equivalent at https://dash.ready-to-review.dev/
 
