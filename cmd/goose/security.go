@@ -148,7 +148,7 @@ func validateGitHubPRURL(rawURL string) error {
 		return errors.New("URL contains @ character")
 	}
 
-	// Reject URLs with URL encoding (could hide malicious content)  
+	// Reject URLs with URL encoding (could hide malicious content)
 	// Exception: %3D which is = in URL encoding, only as part of ?goose=1
 	if strings.Contains(rawURL, "%") && !strings.HasSuffix(rawURL, "?goose%3D1") {
 		return errors.New("URL contains encoded characters")

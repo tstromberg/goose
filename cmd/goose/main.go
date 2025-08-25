@@ -51,6 +51,7 @@ const (
 type PR struct {
 	UpdatedAt         time.Time
 	TurnDataAppliedAt time.Time
+	FirstBlockedAt    time.Time // When this PR was first detected as blocked
 	Title             string
 	URL               string
 	Repository        string
@@ -72,29 +73,30 @@ type TurnResult struct {
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
+	startTime           time.Time
 	client              *github.Client
 	turnClient          *turn.Client
 	currentUser         *github.User
 	previousBlockedPRs  map[string]bool
+	blockedPRTimes      map[string]time.Time
+	browserRateLimiter  *BrowserRateLimiter
 	targetUser          string
 	cacheDir            string
 	authError           string
+	pendingTurnResults  []TurnResult
+	lastMenuTitles      []string
 	incoming            []PR
 	outgoing            []PR
-	lastMenuTitles      []string
-	pendingTurnResults  []TurnResult
 	updateInterval      time.Duration
 	consecutiveFailures int
 	mu                  sync.RWMutex
-	noCache             bool
-	hideStaleIncoming   bool
 	loadingTurnData     bool
 	menuInitialized     bool
 	initialLoadComplete bool
 	enableAudioCues     bool
 	enableAutoBrowser   bool
-	browserRateLimiter  *BrowserRateLimiter
-	startTime           time.Time
+	hideStaleIncoming   bool
+	noCache             bool
 }
 
 func loadCurrentUser(ctx context.Context, app *App) {
@@ -208,6 +210,7 @@ func main() {
 		cacheDir:           cacheDir,
 		hideStaleIncoming:  true,
 		previousBlockedPRs: make(map[string]bool),
+		blockedPRTimes:     make(map[string]time.Time),
 		targetUser:         targetUser,
 		noCache:            noCache,
 		updateInterval:     updateInterval,
@@ -557,6 +560,7 @@ func (app *App) notifyWithSound(ctx context.Context, pr PR, isIncoming bool, pla
 
 	// Play sound only once per refresh cycle
 	if !*playedSound {
+		log.Printf("[SOUND] Playing %s sound for PR: %s #%d - %s", soundType, pr.Repository, pr.Number, pr.Title)
 		app.playSound(ctx, soundType)
 		*playedSound = true
 	}
@@ -568,22 +572,43 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	incoming := app.incoming
 	outgoing := app.outgoing
 	previousBlocked := app.previousBlockedPRs
+	blockedTimes := app.blockedPRTimes
 	autoBrowserEnabled := app.enableAutoBrowser
 	startTime := app.startTime
+	hideStaleIncoming := app.hideStaleIncoming
 	app.mu.RUnlock()
 
 	currentBlocked := make(map[string]bool)
+	newBlockedTimes := make(map[string]time.Time)
 	playedHonk := false
 	playedJet := false
+	now := time.Now()
+	staleThreshold := now.Add(-stalePRThreshold)
 
 	// Check incoming PRs
 	for i := range incoming {
 		if incoming[i].NeedsReview {
 			currentBlocked[incoming[i].URL] = true
-			// Notify if newly blocked
-			if !previousBlocked[incoming[i].URL] {
-				app.notifyWithSound(ctx, incoming[i], true, &playedHonk)
-				app.tryAutoOpenPR(ctx, incoming[i], autoBrowserEnabled, startTime)
+			// Track when first blocked
+			if blockedTime, exists := blockedTimes[incoming[i].URL]; exists {
+				newBlockedTimes[incoming[i].URL] = blockedTime
+				incoming[i].FirstBlockedAt = blockedTime
+			} else if !previousBlocked[incoming[i].URL] {
+				// Newly blocked PR
+				newBlockedTimes[incoming[i].URL] = now
+				incoming[i].FirstBlockedAt = now
+
+				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
+				isStale := incoming[i].UpdatedAt.Before(staleThreshold)
+				if hideStaleIncoming && isStale {
+					log.Printf("[BLOCKED] New incoming PR blocked (stale, skipping): %s #%d - %s",
+						incoming[i].Repository, incoming[i].Number, incoming[i].Title)
+				} else {
+					log.Printf("[BLOCKED] New incoming PR blocked: %s #%d - %s",
+						incoming[i].Repository, incoming[i].Number, incoming[i].Title)
+					app.notifyWithSound(ctx, incoming[i], true, &playedHonk)
+					app.tryAutoOpenPR(ctx, incoming[i], autoBrowserEnabled, startTime)
+				}
 			}
 		}
 	}
@@ -592,19 +617,39 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	for i := range outgoing {
 		if outgoing[i].IsBlocked {
 			currentBlocked[outgoing[i].URL] = true
-			// Notify if newly blocked
-			if !previousBlocked[outgoing[i].URL] {
-				// Add delay if we already played honk sound
-				if playedHonk && !playedJet {
-					time.Sleep(2 * time.Second)
+			// Track when first blocked
+			if blockedTime, exists := blockedTimes[outgoing[i].URL]; exists {
+				newBlockedTimes[outgoing[i].URL] = blockedTime
+				outgoing[i].FirstBlockedAt = blockedTime
+			} else if !previousBlocked[outgoing[i].URL] {
+				// Newly blocked PR
+				newBlockedTimes[outgoing[i].URL] = now
+				outgoing[i].FirstBlockedAt = now
+
+				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
+				isStale := outgoing[i].UpdatedAt.Before(staleThreshold)
+				if hideStaleIncoming && isStale {
+					log.Printf("[BLOCKED] New outgoing PR blocked (stale, skipping): %s #%d - %s",
+						outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
+				} else {
+					// Add delay if we already played honk sound
+					if playedHonk && !playedJet {
+						time.Sleep(2 * time.Second)
+					}
+					log.Printf("[BLOCKED] New outgoing PR blocked: %s #%d - %s",
+						outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
+					app.notifyWithSound(ctx, outgoing[i], false, &playedJet)
+					app.tryAutoOpenPR(ctx, outgoing[i], autoBrowserEnabled, startTime)
 				}
-				app.notifyWithSound(ctx, outgoing[i], false, &playedJet)
-				app.tryAutoOpenPR(ctx, outgoing[i], autoBrowserEnabled, startTime)
 			}
 		}
 	}
 
 	app.mu.Lock()
 	app.previousBlockedPRs = currentBlocked
+	app.blockedPRTimes = newBlockedTimes
+	// Update the PR lists with FirstBlockedAt times
+	app.incoming = incoming
+	app.outgoing = outgoing
 	app.mu.Unlock()
 }
