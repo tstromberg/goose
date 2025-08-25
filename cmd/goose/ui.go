@@ -201,11 +201,16 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		}
 
 		title := fmt.Sprintf("%s #%d", sortedPRs[i].Repository, sortedPRs[i].Number)
-		// Add bullet point or goose for blocked PRs
+		// Add bullet point or emoji for blocked PRs
 		if sortedPRs[i].NeedsReview || sortedPRs[i].IsBlocked {
-			// Show goose emoji for PRs blocked within the last hour
+			// Show emoji for PRs blocked within the last hour
 			if !sortedPRs[i].FirstBlockedAt.IsZero() && time.Since(sortedPRs[i].FirstBlockedAt) < time.Hour {
-				title = fmt.Sprintf("🪿 %s", title)
+				// Use party popper for outgoing PRs, goose for incoming PRs
+				if sectionTitle == "Outgoing" {
+					title = fmt.Sprintf("🎉 %s", title)
+				} else {
+					title = fmt.Sprintf("🪿 %s", title)
+				}
 			} else {
 				title = fmt.Sprintf("• %s", title)
 			}
