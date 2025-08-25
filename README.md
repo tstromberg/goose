@@ -1,16 +1,17 @@
-# Ready-to-Review Goose 🪿
+# Review Goose 🪿
 
-![Experimental](https://img.shields.io/badge/status-beta-orange)
+![Beta](https://img.shields.io/badge/status-beta-orange)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20BSD%20%7C%20Windows-blue)
 ![Goose Noises](https://img.shields.io/badge/goose%20noises-100%25%20more-green)
 [![GitHub](https://img.shields.io/github/stars/ready-to-review/goose?style=social)](https://github.com/ready-to-review/goose)
+
+![Review Goose Logo](media/logo-small.png)
 
 The only PR tracker that honks at you when you're the bottleneck. Now shipping with 100% more goose noises!
 
 Lives in your menubar like a tiny waterfowl of productivity shame, watching your GitHub PRs and making aggressive bird sounds when you're blocking someone's code from seeing the light of production.
 
-
-![PR Menubar Screenshot](media/screenshot.png)
+![Review Goose Screenshot](media/screenshot.png)
 
 ## What It Does
 
@@ -67,8 +68,8 @@ We don't yet try to persist fine-grained tokens to disk - PR's welcome!
 ## Pricing
 
 The Goose is part of the [codeGROOVE](https://codegroove.dev) developer acceleration platform:
-- **FREE forever** for open-source repositories
-- Low-cost fee TBD for access to private repos (the goose needs to eat!)
+- **FREE forever** for open-source or public repositories
+- GitHub Sponsors gain access to private repos ($2.56/mo recommended)
 
 ## Privacy
 
