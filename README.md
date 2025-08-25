@@ -69,7 +69,7 @@ We don't yet try to persist fine-grained tokens to disk - PR's welcome!
 
 The Goose is part of the [codeGROOVE](https://codegroove.dev) developer acceleration platform:
 - **FREE forever** for open-source or public repositories
-- GitHub Sponsors gain access to private repos ($2.56/mo recommended)
+- Coming soon: GitHub Sponsors gain access to private repos ($2.56/mo recommended)
 
 ## Privacy
 
