@@ -142,16 +142,21 @@ func (app *App) setTrayTitle() {
 	counts := app.countPRs()
 
 	// Set title based on PR state
+	var title string
 	switch {
 	case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
-		systray.SetTitle("😊")
+		title = "😊"
 	case counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("🪿 %d 🎉 %d", counts.IncomingBlocked, counts.OutgoingBlocked))
+		title = fmt.Sprintf("🪿 %d 🎉 %d", counts.IncomingBlocked, counts.OutgoingBlocked)
 	case counts.IncomingBlocked > 0:
-		systray.SetTitle(fmt.Sprintf("🪿 %d", counts.IncomingBlocked))
+		title = fmt.Sprintf("🪿 %d", counts.IncomingBlocked)
 	default:
-		systray.SetTitle(fmt.Sprintf("🎉 %d", counts.OutgoingBlocked))
+		title = fmt.Sprintf("🎉 %d", counts.OutgoingBlocked)
 	}
+
+	log.Printf("[TRAY] Setting title: %s (incoming_blocked=%d, outgoing_blocked=%d)",
+		title, counts.IncomingBlocked, counts.OutgoingBlocked)
+	systray.SetTitle(title)
 }
 
 // sortPRsBlockedFirst creates a sorted copy of PRs with blocked ones first.
@@ -201,11 +206,20 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		}
 
 		title := fmt.Sprintf("%s #%d", sortedPRs[i].Repository, sortedPRs[i].Number)
-		// Add bullet point or goose for blocked PRs
+		// Add bullet point or emoji for blocked PRs
 		if sortedPRs[i].NeedsReview || sortedPRs[i].IsBlocked {
-			// Show goose emoji for PRs blocked within the last hour
+			// Show emoji for PRs blocked within the last hour
 			if !sortedPRs[i].FirstBlockedAt.IsZero() && time.Since(sortedPRs[i].FirstBlockedAt) < time.Hour {
-				title = fmt.Sprintf("🪿 %s", title)
+				// Use party popper for outgoing PRs, goose for incoming PRs
+				if sectionTitle == "Outgoing" {
+					title = fmt.Sprintf("🎉 %s", title)
+					log.Printf("[MENU] Adding party popper to outgoing PR: %s (blocked %v ago)",
+						sortedPRs[i].URL, time.Since(sortedPRs[i].FirstBlockedAt))
+				} else {
+					title = fmt.Sprintf("🪿 %s", title)
+					log.Printf("[MENU] Adding goose to incoming PR: %s (blocked %v ago)",
+						sortedPRs[i].URL, time.Since(sortedPRs[i].FirstBlockedAt))
+				}
 			} else {
 				title = fmt.Sprintf("• %s", title)
 			}

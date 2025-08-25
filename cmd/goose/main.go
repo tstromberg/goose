@@ -568,15 +568,26 @@ func (app *App) notifyWithSound(ctx context.Context, pr PR, isIncoming bool, pla
 
 // checkForNewlyBlockedPRs sends notifications for blocked PRs.
 func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
-	app.mu.RLock()
-	incoming := app.incoming
-	outgoing := app.outgoing
+	// Check for context cancellation early
+	select {
+	case <-ctx.Done():
+		log.Print("[BLOCKED] Context cancelled, skipping newly blocked PR check")
+		return
+	default:
+	}
+
+	app.mu.Lock()
+	// Make deep copies to work with while holding the lock
+	incoming := make([]PR, len(app.incoming))
+	copy(incoming, app.incoming)
+	outgoing := make([]PR, len(app.outgoing))
+	copy(outgoing, app.outgoing)
 	previousBlocked := app.previousBlockedPRs
 	blockedTimes := app.blockedPRTimes
 	autoBrowserEnabled := app.enableAutoBrowser
 	startTime := app.startTime
 	hideStaleIncoming := app.hideStaleIncoming
-	app.mu.RUnlock()
+	app.mu.Unlock()
 
 	currentBlocked := make(map[string]bool)
 	newBlockedTimes := make(map[string]time.Time)
@@ -597,6 +608,8 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 				// Newly blocked PR
 				newBlockedTimes[incoming[i].URL] = now
 				incoming[i].FirstBlockedAt = now
+				log.Printf("[BLOCKED] Setting FirstBlockedAt for incoming PR: %s #%d at %v",
+					incoming[i].Repository, incoming[i].Number, now)
 
 				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
 				isStale := incoming[i].UpdatedAt.Before(staleThreshold)
@@ -625,6 +638,8 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 				// Newly blocked PR
 				newBlockedTimes[outgoing[i].URL] = now
 				outgoing[i].FirstBlockedAt = now
+				log.Printf("[BLOCKED] Setting FirstBlockedAt for outgoing PR: %s #%d at %v",
+					outgoing[i].Repository, outgoing[i].Number, now)
 
 				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
 				isStale := outgoing[i].UpdatedAt.Before(staleThreshold)
@@ -645,11 +660,21 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 		}
 	}
 
+	// Update state with a lock
 	app.mu.Lock()
 	app.previousBlockedPRs = currentBlocked
 	app.blockedPRTimes = newBlockedTimes
 	// Update the PR lists with FirstBlockedAt times
 	app.incoming = incoming
 	app.outgoing = outgoing
+	menuInitialized := app.menuInitialized
 	app.mu.Unlock()
+
+	// Update UI after releasing the lock
+	// Only update if there are newly blocked PRs
+	if menuInitialized && len(currentBlocked) > len(previousBlocked) {
+		log.Print("[BLOCKED] Updating UI for newly blocked PRs")
+		app.setTrayTitle()
+		app.updateMenu(ctx)
+	}
 }
