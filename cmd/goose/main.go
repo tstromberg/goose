@@ -743,7 +743,7 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 		default:
 			log.Printf("[BLOCKED] Updating UI after cleaning up %d stale entries", removedCount)
 		}
-		app.setTrayTitle()
+		// updateMenu will call setTrayTitle via rebuildMenu
 		app.updateMenu(ctx)
 	}
 }
