@@ -154,8 +154,9 @@ func (app *App) setTrayTitle() {
 		title = fmt.Sprintf("🎉 %d", counts.OutgoingBlocked)
 	}
 
-	log.Printf("[TRAY] Setting title: %s (incoming_blocked=%d, outgoing_blocked=%d)",
-		title, counts.IncomingBlocked, counts.OutgoingBlocked)
+	// Log title change with detailed counts
+	log.Printf("[TRAY] Setting title to '%s' (incoming_total=%d, incoming_blocked=%d, outgoing_total=%d, outgoing_blocked=%d)",
+		title, counts.IncomingTotal, counts.IncomingBlocked, counts.OutgoingTotal, counts.OutgoingBlocked)
 	systray.SetTitle(title)
 }
 

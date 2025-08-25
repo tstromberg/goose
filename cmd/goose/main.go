@@ -611,7 +611,36 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	outgoing := make([]PR, len(app.outgoing))
 	copy(outgoing, app.outgoing)
 	previousBlocked := app.previousBlockedPRs
-	blockedTimes := app.blockedPRTimes
+
+	// Clean up blockedPRTimes first to remove stale entries
+	// Only keep blocked times for PRs that are actually in the current lists
+	cleanedBlockedTimes := make(map[string]time.Time)
+	for i := range app.incoming {
+		if blockTime, exists := app.blockedPRTimes[app.incoming[i].URL]; exists {
+			cleanedBlockedTimes[app.incoming[i].URL] = blockTime
+		}
+	}
+	for i := range app.outgoing {
+		if blockTime, exists := app.blockedPRTimes[app.outgoing[i].URL]; exists {
+			cleanedBlockedTimes[app.outgoing[i].URL] = blockTime
+		}
+	}
+
+	// Log any removed entries
+	removedCount := 0
+	for url := range app.blockedPRTimes {
+		if _, exists := cleanedBlockedTimes[url]; !exists {
+			log.Printf("[BLOCKED] Removing stale blocked time for PR no longer in list: %s", url)
+			removedCount++
+		}
+	}
+	if removedCount > 0 {
+		log.Printf("[BLOCKED] Cleaned up %d stale blocked PR times", removedCount)
+	}
+
+	// Update the app's blockedPRTimes to the cleaned version to prevent memory growth
+	app.blockedPRTimes = cleanedBlockedTimes
+	blockedTimes := cleanedBlockedTimes
 	autoBrowserEnabled := app.enableAutoBrowser
 	startTime := app.startTime
 	hideStaleIncoming := app.hideStaleIncoming
@@ -688,27 +717,10 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 		}
 	}
 
-	// Clean up blockedPRTimes to only include PRs that are currently in the lists
-	// This ensures merged/closed PRs don't persist
-	cleanedBlockedTimes := make(map[string]time.Time)
-	var removedCount int
-	for url, blockTime := range newBlockedTimes {
-		// Only keep blocked times for PRs that are still in current lists
-		if currentBlocked[url] {
-			cleanedBlockedTimes[url] = blockTime
-		} else {
-			removedCount++
-			log.Printf("[BLOCKED] Removing stale blocked time for PR no longer in list: %s", url)
-		}
-	}
-	if removedCount > 0 {
-		log.Printf("[BLOCKED] Cleaned up %d stale blocked PR times (likely merged/closed)", removedCount)
-	}
-
 	// Update state with a lock
 	app.mu.Lock()
 	app.previousBlockedPRs = currentBlocked
-	app.blockedPRTimes = cleanedBlockedTimes
+	app.blockedPRTimes = newBlockedTimes
 	// Update the PR lists with FirstBlockedAt times
 	app.incoming = incoming
 	app.outgoing = outgoing
