@@ -728,9 +728,21 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 	app.mu.Unlock()
 
 	// Update UI after releasing the lock
-	// Only update if there are newly blocked PRs
-	if menuInitialized && len(currentBlocked) > len(previousBlocked) {
-		log.Print("[BLOCKED] Updating UI for newly blocked PRs")
+	// Check if the set of blocked PRs has changed
+	blockedPRsChanged := !reflect.DeepEqual(currentBlocked, previousBlocked)
+
+	// Update UI if blocked PRs changed or if we cleaned up stale entries
+	if menuInitialized && (blockedPRsChanged || removedCount > 0) {
+		switch {
+		case len(currentBlocked) > len(previousBlocked):
+			log.Print("[BLOCKED] Updating UI for newly blocked PRs")
+		case len(currentBlocked) < len(previousBlocked):
+			log.Print("[BLOCKED] Updating UI - blocked PRs were removed")
+		case blockedPRsChanged:
+			log.Print("[BLOCKED] Updating UI - blocked PRs changed (same count)")
+		default:
+			log.Printf("[BLOCKED] Updating UI after cleaning up %d stale entries", removedCount)
+		}
 		app.setTrayTitle()
 		app.updateMenu(ctx)
 	}
