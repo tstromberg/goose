@@ -15,18 +15,6 @@ import (
 	"github.com/energye/systray"
 )
 
-// openURLAutoStrict safely opens a URL in the default browser with strict validation for auto-opening.
-// This function is used for auto-opening PRs and enforces stricter URL patterns.
-func openURLAutoStrict(ctx context.Context, rawURL string) error {
-	// Validate against strict GitHub PR URL pattern
-	if err := validateGitHubPRURL(rawURL); err != nil {
-		return fmt.Errorf("strict validation failed: %w", err)
-	}
-
-	// Use the regular openURL after strict validation passes
-	return openURL(ctx, rawURL)
-}
-
 // openURL safely opens a URL in the default browser after validation.
 func openURL(ctx context.Context, rawURL string) error {
 	// Parse and validate the URL
@@ -172,29 +160,6 @@ func (app *App) setTrayTitle() {
 	systray.SetTitle(title)
 }
 
-// sortPRsBlockedFirst creates a sorted copy of PRs with blocked ones first.
-// This maintains stable ordering within blocked and non-blocked groups.
-func sortPRsBlockedFirst(prs []PR) []PR {
-	// Create a copy to avoid modifying the original slice
-	sorted := make([]PR, len(prs))
-	copy(sorted, prs)
-
-	// Stable sort: blocked PRs first, then by update time (newest first)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		// First priority: blocked status
-		if sorted[i].NeedsReview != sorted[j].NeedsReview {
-			return sorted[i].NeedsReview // true (blocked) comes before false
-		}
-		if sorted[i].IsBlocked != sorted[j].IsBlocked {
-			return sorted[i].IsBlocked // true (blocked) comes before false
-		}
-		// Second priority: more recent PRs first
-		return sorted[i].UpdatedAt.After(sorted[j].UpdatedAt)
-	})
-
-	return sorted
-}
-
 // addPRSection adds a section of PRs to the menu.
 func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string, blockedCount int) {
 	if len(prs) == 0 {
@@ -207,8 +172,20 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	header := systray.AddMenuItem(headerText, "")
 	header.Disable()
 
-	// Sort PRs with blocked ones first
-	sortedPRs := sortPRsBlockedFirst(prs)
+	// Sort PRs with blocked ones first - inline for simplicity
+	sortedPRs := make([]PR, len(prs))
+	copy(sortedPRs, prs)
+	sort.SliceStable(sortedPRs, func(i, j int) bool {
+		// First priority: blocked status
+		if sortedPRs[i].NeedsReview != sortedPRs[j].NeedsReview {
+			return sortedPRs[i].NeedsReview // true (blocked) comes before false
+		}
+		if sortedPRs[i].IsBlocked != sortedPRs[j].IsBlocked {
+			return sortedPRs[i].IsBlocked // true (blocked) comes before false
+		}
+		// Second priority: more recent PRs first
+		return sortedPRs[i].UpdatedAt.After(sortedPRs[j].UpdatedAt)
+	})
 
 	// Get hidden orgs with proper locking
 	app.mu.RLock()
@@ -220,40 +197,40 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	app.mu.RUnlock()
 
 	// Add PR items in sorted order
-	for i := range sortedPRs {
+	for prIndex := range sortedPRs {
 		// Apply filters
 		// Skip PRs from hidden orgs
-		org := extractOrgFromRepo(sortedPRs[i].Repository)
+		org := extractOrgFromRepo(sortedPRs[prIndex].Repository)
 		if org != "" && hiddenOrgs[org] {
 			continue
 		}
 
 		// Skip stale PRs if configured
-		if hideStale && sortedPRs[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
+		if hideStale && sortedPRs[prIndex].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
 			continue
 		}
 
-		title := fmt.Sprintf("%s #%d", sortedPRs[i].Repository, sortedPRs[i].Number)
+		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
 		// Add bullet point or emoji for blocked PRs
-		if sortedPRs[i].NeedsReview || sortedPRs[i].IsBlocked {
+		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			// Show emoji for PRs blocked within the last 25 minutes
-			if !sortedPRs[i].FirstBlockedAt.IsZero() && time.Since(sortedPRs[i].FirstBlockedAt) < blockedPRIconDuration {
+			if !sortedPRs[prIndex].FirstBlockedAt.IsZero() && time.Since(sortedPRs[prIndex].FirstBlockedAt) < blockedPRIconDuration {
 				// Use party popper for outgoing PRs, goose for incoming PRs
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
 					log.Printf("[MENU] Adding party popper to outgoing PR: %s (blocked %v ago)",
-						sortedPRs[i].URL, time.Since(sortedPRs[i].FirstBlockedAt))
+						sortedPRs[prIndex].URL, time.Since(sortedPRs[prIndex].FirstBlockedAt))
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
 					log.Printf("[MENU] Adding goose to incoming PR: %s (blocked %v ago)",
-						sortedPRs[i].URL, time.Since(sortedPRs[i].FirstBlockedAt))
+						sortedPRs[prIndex].URL, time.Since(sortedPRs[prIndex].FirstBlockedAt))
 				}
 			} else {
 				title = fmt.Sprintf("• %s", title)
 			}
 		}
 		// Format age inline for tooltip
-		duration := time.Since(sortedPRs[i].UpdatedAt)
+		duration := time.Since(sortedPRs[prIndex].UpdatedAt)
 		var age string
 		switch {
 		case duration < time.Hour:
@@ -265,19 +242,19 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		case duration < 365*24*time.Hour:
 			age = fmt.Sprintf("%dmo", int(duration.Hours()/(24*30)))
 		default:
-			age = sortedPRs[i].UpdatedAt.Format("2006")
+			age = sortedPRs[prIndex].UpdatedAt.Format("2006")
 		}
-		tooltip := fmt.Sprintf("%s (%s)", sortedPRs[i].Title, age)
+		tooltip := fmt.Sprintf("%s (%s)", sortedPRs[prIndex].Title, age)
 		// Add action reason for blocked PRs
-		if (sortedPRs[i].NeedsReview || sortedPRs[i].IsBlocked) && sortedPRs[i].ActionReason != "" {
-			tooltip = fmt.Sprintf("%s - %s", tooltip, sortedPRs[i].ActionReason)
+		if (sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked) && sortedPRs[prIndex].ActionReason != "" {
+			tooltip = fmt.Sprintf("%s - %s", tooltip, sortedPRs[prIndex].ActionReason)
 		}
 
 		// Create PR menu item
 		item := systray.AddMenuItem(title, tooltip)
 
 		// Capture URL to avoid loop variable capture bug
-		prURL := sortedPRs[i].URL
+		prURL := sortedPRs[prIndex].URL
 		item.Click(func() {
 			if err := openURL(ctx, prURL); err != nil {
 				log.Printf("failed to open url: %v", err)
@@ -442,8 +419,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 					orgItem.Check()
 					log.Printf("[SETTINGS] Hiding org: %s", orgName)
 				}
-				// Clear menu titles to force rebuild
-				app.lastMenuTitles = nil
+				// Menu always rebuilds now - no need to clear titles
 				app.mu.Unlock()
 
 				// Save settings
@@ -465,8 +441,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		app.mu.Lock()
 		app.hideStaleIncoming = !app.hideStaleIncoming
 		hideStale := app.hideStaleIncoming
-		// Clear menu titles to force rebuild
-		app.lastMenuTitles = nil
+		// Menu always rebuilds now - no need to clear titles
 		app.mu.Unlock()
 
 		if hideStale {

@@ -221,10 +221,8 @@ type prResult struct {
 	wasFromCache bool
 }
 
-// fetchPRsInternal is the implementation for PR fetching.
-// It returns GitHub data immediately and starts Turn API queries in the background (when waitForTurn=false),
-// or waits for Turn data to complete (when waitForTurn=true).
-func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incoming []PR, outgoing []PR, _ error) {
+// fetchPRsInternal fetches PRs and Turn data synchronously for simplicity.
+func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing []PR, _ error) {
 	// Check if we have a client
 	if app.client == nil {
 		return nil, nil, fmt.Errorf("no GitHub client available: %s", app.authError)
@@ -362,69 +360,10 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 	log.Printf("[GITHUB] Found %d incoming, %d outgoing PRs from GitHub", len(incoming), len(outgoing))
 
 	// Fetch Turn API data
-	if waitForTurn {
-		// Synchronous - wait for Turn data
-		// Fetch Turn API data synchronously before building menu
-		app.fetchTurnDataSync(ctx, allIssues, user, &incoming, &outgoing)
-	} else {
-		// Asynchronous - start in background
-		app.mu.Lock()
-		app.loadingTurnData = true
-		app.pendingTurnResults = make([]TurnResult, 0) // Reset buffer
-		app.mu.Unlock()
-		go app.fetchTurnDataAsync(ctx, allIssues, user)
-	}
+	// Always synchronous now for simplicity - Turn API calls are fast with caching
+	app.fetchTurnDataSync(ctx, allIssues, user, &incoming, &outgoing)
 
 	return incoming, outgoing, nil
-}
-
-// updatePRData updates PR data with Turn API results.
-func (app *App) updatePRData(url string, needsReview bool, isOwner bool, actionReason string) (*PR, bool) {
-	app.mu.Lock()
-	defer app.mu.Unlock()
-
-	if isOwner {
-		// Update outgoing PRs
-		for i := range app.outgoing {
-			if app.outgoing[i].URL != url {
-				continue
-			}
-			// Check if Turn data was already applied for this UpdatedAt
-			now := time.Now()
-			if app.outgoing[i].TurnDataAppliedAt.After(app.outgoing[i].UpdatedAt) {
-				// Turn data already applied for this PR version, no change
-				return &app.outgoing[i], false
-			}
-			changed := app.outgoing[i].NeedsReview != needsReview ||
-				app.outgoing[i].IsBlocked != needsReview ||
-				app.outgoing[i].ActionReason != actionReason
-			app.outgoing[i].NeedsReview = needsReview
-			app.outgoing[i].IsBlocked = needsReview
-			app.outgoing[i].ActionReason = actionReason
-			app.outgoing[i].TurnDataAppliedAt = now
-			return &app.outgoing[i], changed
-		}
-	} else {
-		// Update incoming PRs
-		for i := range app.incoming {
-			if app.incoming[i].URL != url {
-				continue
-			}
-			// Check if Turn data was already applied for this UpdatedAt
-			now := time.Now()
-			if app.incoming[i].TurnDataAppliedAt.After(app.incoming[i].UpdatedAt) {
-				// Turn data already applied for this PR version, no change
-				return &app.incoming[i], false
-			}
-			changed := app.incoming[i].NeedsReview != needsReview ||
-				app.incoming[i].ActionReason != actionReason
-			app.incoming[i].NeedsReview = needsReview
-			app.incoming[i].ActionReason = actionReason
-			app.incoming[i].TurnDataAppliedAt = now
-			return &app.incoming[i], changed
-		}
-	}
-	return nil, false
 }
 
 // fetchTurnDataSync fetches Turn API data synchronously and updates PRs directly.
@@ -522,145 +461,4 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 
 	log.Printf("[TURN] Turn API queries completed in %v (%d/%d succeeded)",
 		time.Since(turnStart), turnSuccesses, turnSuccesses+turnFailures)
-}
-
-// fetchTurnDataAsync fetches Turn API data in the background and updates PRs as results arrive.
-func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, user string) {
-	turnStart := time.Now()
-
-	// Create a channel for results
-	results := make(chan prResult, len(issues))
-
-	// Use a WaitGroup to track goroutines
-	var wg sync.WaitGroup
-
-	// Create semaphore to limit concurrent Turn API calls
-	sem := make(chan struct{}, maxConcurrentTurnAPICalls)
-
-	// Process PRs in parallel with concurrency limit
-	for _, issue := range issues {
-		if !issue.IsPullRequest() {
-			continue
-		}
-
-		wg.Add(1)
-		go func(issue *github.Issue) {
-			defer wg.Done()
-
-			// Acquire semaphore
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			url := issue.GetHTMLURL()
-			updatedAt := issue.GetUpdatedAt().Time
-
-			// Call turnData - it now has proper exponential backoff with jitter
-			turnData, wasFromCache, err := app.turnData(ctx, url, updatedAt)
-
-			results <- prResult{
-				url:          issue.GetHTMLURL(),
-				turnData:     turnData,
-				err:          err,
-				isOwner:      issue.GetUser().GetLogin() == user,
-				wasFromCache: wasFromCache,
-			}
-		}(issue)
-	}
-
-	// Close the results channel when all goroutines are done
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect results and update PRs incrementally
-	turnSuccesses := 0
-	turnFailures := 0
-	updatesApplied := 0
-
-	// Process results as they arrive and buffer them
-
-	for result := range results {
-		if result.err == nil && result.turnData != nil && result.turnData.PRState.UnblockAction != nil {
-			turnSuccesses++
-
-			// Check if user needs to review and get action reason
-			needsReview := false
-			actionReason := ""
-			if action, exists := result.turnData.PRState.UnblockAction[user]; exists {
-				needsReview = true
-				actionReason = action.Reason
-				// Only log blocked PRs from fresh API calls
-				if !result.wasFromCache {
-					log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
-				}
-			}
-
-			// Buffer the Turn result instead of applying immediately
-			turnResult := TurnResult{
-				URL:          result.url,
-				NeedsReview:  needsReview,
-				IsOwner:      result.isOwner,
-				ActionReason: actionReason,
-				WasFromCache: result.wasFromCache,
-			}
-
-			app.mu.Lock()
-			app.pendingTurnResults = append(app.pendingTurnResults, turnResult)
-			app.mu.Unlock()
-
-			updatesApplied++
-			// Only log fresh API calls (not cached)
-			if !result.wasFromCache {
-				log.Printf("[TURN] Fresh API data for %s (needsReview=%v)", result.url, needsReview)
-			}
-		} else if result.err != nil {
-			turnFailures++
-		}
-	}
-
-	log.Printf("[TURN] Turn API queries completed in %v (%d/%d succeeded, %d PRs updated)",
-		time.Since(turnStart), turnSuccesses, turnSuccesses+turnFailures, updatesApplied)
-
-	// Apply all buffered Turn results at once
-	app.mu.Lock()
-	pendingResults := app.pendingTurnResults
-	app.pendingTurnResults = nil
-	app.loadingTurnData = false
-	app.mu.Unlock()
-
-	// Check if any results came from fresh API calls (not cache)
-	var cacheHits, freshResults int
-	for _, result := range pendingResults {
-		if result.WasFromCache {
-			cacheHits++
-		} else {
-			freshResults++
-		}
-	}
-
-	// Only log if we have fresh results
-	if freshResults > 0 {
-		log.Printf("[TURN] Applying %d buffered Turn results (%d from cache, %d fresh)", len(pendingResults), cacheHits, freshResults)
-	}
-
-	// Track how many PRs actually changed
-	var actualChanges int
-	for _, result := range pendingResults {
-		_, changed := app.updatePRData(result.URL, result.NeedsReview, result.IsOwner, result.ActionReason)
-		if changed {
-			actualChanges++
-		}
-	}
-
-	// Only check for newly blocked PRs if there were actual changes
-	// checkForNewlyBlockedPRs will handle UI updates internally if needed
-	if actualChanges > 0 {
-		app.checkForNewlyBlockedPRs(ctx)
-		// UI updates are handled inside checkForNewlyBlockedPRs
-	} else {
-		// No PR data changes, but still need to update menu in case icons expired
-		// (e.g., party popper changing to bullet after 25 minutes)
-		app.updateMenu(ctx)
-	}
 }

@@ -37,14 +37,14 @@ const (
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
 	defaultUpdateInterval     = 1 * time.Minute
-	blockedPRIconDuration     = 25 * time.Minute
+	blockedPRIconDuration     = 1 * time.Minute
 	maxRetryDelay             = 2 * time.Minute
 	maxRetries                = 10
 	minorFailureThreshold     = 3
 	majorFailureThreshold     = 10
 	panicFailureIncrement     = 10
 	turnAPITimeout            = 10 * time.Second
-	maxConcurrentTurnAPICalls = 10
+	maxConcurrentTurnAPICalls = 20
 	defaultMaxBrowserOpensDay = 20
 )
 
@@ -62,15 +62,6 @@ type PR struct {
 	NeedsReview       bool
 }
 
-// TurnResult represents a Turn API result to be applied later.
-type TurnResult struct {
-	URL          string
-	ActionReason string
-	NeedsReview  bool
-	IsOwner      bool
-	WasFromCache bool // Track if this result came from cache
-}
-
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
@@ -84,15 +75,14 @@ type App struct {
 	targetUser          string
 	cacheDir            string
 	authError           string
-	pendingTurnResults  []TurnResult
-	lastMenuTitles      []string
-	lastMenuRebuild     time.Time
+	// Removed pendingTurnResults - simplified to synchronous approach
+	// Removed lastMenuTitles and lastMenuRebuild - simplified to always rebuild
 	incoming            []PR
 	outgoing            []PR
 	updateInterval      time.Duration
 	consecutiveFailures int
 	mu                  sync.RWMutex
-	loadingTurnData     bool
+	// Removed loadingTurnData - simplified to synchronous approach
 	menuInitialized     bool
 	initialLoadComplete bool
 	enableAudioCues     bool
@@ -218,7 +208,7 @@ func main() {
 		targetUser:         targetUser,
 		noCache:            noCache,
 		updateInterval:     updateInterval,
-		pendingTurnResults: make([]TurnResult, 0),
+		// Removed pendingTurnResults initialization - simplified to synchronous
 		enableAudioCues:    true,
 		enableAutoBrowser:  false, // Default to false for safety
 		browserRateLimiter: NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
@@ -343,7 +333,7 @@ func (app *App) updateLoop(ctx context.Context) {
 }
 
 func (app *App) updatePRs(ctx context.Context) {
-	incoming, outgoing, err := app.fetchPRsInternal(ctx, false)
+	incoming, outgoing, err := app.fetchPRsInternal(ctx)
 	if err != nil {
 		log.Printf("Error fetching PRs: %v", err)
 		app.mu.Lock()
@@ -450,95 +440,16 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.updateMenu(ctx)
 }
 
-// hasIconAboutToExpire checks if any PR icon is near its expiration time.
-// Returns true if any blocked PR has been blocked for approximately 25 minutes.
-func (app *App) hasIconAboutToExpire() bool {
-	now := time.Now()
-	windowStart := blockedPRIconDuration - time.Minute
-	windowEnd := blockedPRIconDuration + time.Minute
-
-	// Check incoming PRs
-	for i := range app.incoming {
-		if !app.incoming[i].NeedsReview || app.incoming[i].FirstBlockedAt.IsZero() {
-			continue
-		}
-		age := now.Sub(app.incoming[i].FirstBlockedAt)
-		// Icon expires at blockedPRIconDuration; check if we're within a minute of that
-		if age > windowStart && age < windowEnd {
-			log.Printf("[MENU] Incoming PR %s #%d icon expiring soon (blocked %v ago)",
-				app.incoming[i].Repository, app.incoming[i].Number, age.Round(time.Second))
-			return true
-		}
-	}
-
-	// Check outgoing PRs
-	for i := range app.outgoing {
-		if !app.outgoing[i].IsBlocked || app.outgoing[i].FirstBlockedAt.IsZero() {
-			continue
-		}
-		age := now.Sub(app.outgoing[i].FirstBlockedAt)
-		if age > windowStart && age < windowEnd {
-			log.Printf("[MENU] Outgoing PR %s #%d icon expiring soon (blocked %v ago)",
-				app.outgoing[i].Repository, app.outgoing[i].Number, age.Round(time.Second))
-			return true
-		}
-	}
-
-	return false
-}
-
-// updateMenu rebuilds the menu only when content actually changes.
+// updateMenu rebuilds the menu every time - simple and reliable.
 func (app *App) updateMenu(ctx context.Context) {
-	app.mu.RLock()
-	// Skip menu updates while Turn data is still loading
-	if app.loadingTurnData {
-		app.mu.RUnlock()
-		log.Println("[MENU] Skipping menu update: Turn data still loading")
-		return
-	}
-
-	// Build current menu titles for comparison
-	var currentTitles []string
-	for i := range app.incoming {
-		currentTitles = append(currentTitles, fmt.Sprintf("IN:%s #%d", app.incoming[i].Repository, app.incoming[i].Number))
-	}
-	for i := range app.outgoing {
-		currentTitles = append(currentTitles, fmt.Sprintf("OUT:%s #%d", app.outgoing[i].Repository, app.outgoing[i].Number))
-	}
-
-	lastTitles := app.lastMenuTitles
-	lastRebuild := app.lastMenuRebuild
-	hasExpiringIcons := app.hasIconAboutToExpire()
-	app.mu.RUnlock()
-
-	// Rebuild if:
-	// 1. PR list changed, OR
-	// 2. An icon is about to expire and we haven't rebuilt recently
-	titlesChanged := !reflect.DeepEqual(lastTitles, currentTitles)
-	timeSinceLastRebuild := time.Since(lastRebuild)
-	iconUpdateDue := hasExpiringIcons && timeSinceLastRebuild > 30*time.Second
-
-	if titlesChanged || iconUpdateDue {
-		app.mu.Lock()
-		if titlesChanged {
-			app.lastMenuTitles = currentTitles
-			log.Printf("[MENU] PR list changed, triggering rebuild (was %d items, now %d items)",
-				len(lastTitles), len(currentTitles))
-		}
-		app.lastMenuRebuild = time.Now()
-		app.mu.Unlock()
-
-		if iconUpdateDue {
-			log.Printf("[MENU] Rebuilding menu: party popper icon expiring (last rebuild: %v ago)",
-				timeSinceLastRebuild.Round(time.Second))
-		}
-		app.rebuildMenu(ctx)
-	}
+	// Always rebuild - it's just a small menu, performance is not an issue
+	log.Println("[MENU] Rebuilding menu")
+	app.rebuildMenu(ctx)
 }
 
 // updatePRsWithWait fetches PRs and waits for Turn data before building initial menu.
 func (app *App) updatePRsWithWait(ctx context.Context) {
-	incoming, outgoing, err := app.fetchPRsInternal(ctx, true)
+	incoming, outgoing, err := app.fetchPRsInternal(ctx)
 	if err != nil {
 		log.Printf("Error fetching PRs: %v", err)
 		app.mu.Lock()
@@ -619,7 +530,12 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled boo
 		log.Printf("[BROWSER] Auto-opening newly blocked PR: %s #%d - %s",
 			pr.Repository, pr.Number, pr.URL)
 		// Use strict validation for auto-opened URLs
-		if err := openURLAutoStrict(ctx, pr.URL); err != nil {
+		// Validate against strict GitHub PR URL pattern for auto-opening
+		if err := validateGitHubPRURL(pr.URL); err != nil {
+			log.Printf("Auto-open strict validation failed for %s: %v", sanitizeForLog(pr.URL), err)
+			return
+		}
+		if err := openURL(ctx, pr.URL); err != nil {
 			log.Printf("[BROWSER] Failed to auto-open PR %s: %v", pr.URL, err)
 		} else {
 			app.browserRateLimiter.RecordOpen(pr.URL)
