@@ -37,13 +37,14 @@ const (
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
 	defaultUpdateInterval     = 1 * time.Minute
+	blockedPRIconDuration     = 1 * time.Minute
 	maxRetryDelay             = 2 * time.Minute
 	maxRetries                = 10
 	minorFailureThreshold     = 3
 	majorFailureThreshold     = 10
 	panicFailureIncrement     = 10
 	turnAPITimeout            = 10 * time.Second
-	maxConcurrentTurnAPICalls = 10
+	maxConcurrentTurnAPICalls = 20
 	defaultMaxBrowserOpensDay = 20
 )
 
@@ -61,15 +62,6 @@ type PR struct {
 	NeedsReview       bool
 }
 
-// TurnResult represents a Turn API result to be applied later.
-type TurnResult struct {
-	URL          string
-	ActionReason string
-	NeedsReview  bool
-	IsOwner      bool
-	WasFromCache bool // Track if this result came from cache
-}
-
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
@@ -83,14 +75,14 @@ type App struct {
 	targetUser          string
 	cacheDir            string
 	authError           string
-	pendingTurnResults  []TurnResult
-	lastMenuTitles      []string
+	// Removed pendingTurnResults - simplified to synchronous approach
+	// Removed lastMenuTitles and lastMenuRebuild - simplified to always rebuild
 	incoming            []PR
 	outgoing            []PR
 	updateInterval      time.Duration
 	consecutiveFailures int
 	mu                  sync.RWMutex
-	loadingTurnData     bool
+	// Removed loadingTurnData - simplified to synchronous approach
 	menuInitialized     bool
 	initialLoadComplete bool
 	enableAudioCues     bool
@@ -120,10 +112,10 @@ func loadCurrentUser(ctx context.Context, app *App) {
 		return nil
 	},
 		retry.Attempts(maxRetries),
-		retry.DelayType(retry.BackOffDelay),
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
 		retry.MaxDelay(maxRetryDelay),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("GitHub Users.Get retry %d/%d: %v", n+1, maxRetries, err)
+			log.Printf("[GITHUB] Users.Get retry %d/%d: %v", n+1, maxRetries, err)
 		}),
 		retry.Context(ctx),
 	)
@@ -216,7 +208,7 @@ func main() {
 		targetUser:         targetUser,
 		noCache:            noCache,
 		updateInterval:     updateInterval,
-		pendingTurnResults: make([]TurnResult, 0),
+		// Removed pendingTurnResults initialization - simplified to synchronous
 		enableAudioCues:    true,
 		enableAutoBrowser:  false, // Default to false for safety
 		browserRateLimiter: NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
@@ -341,7 +333,7 @@ func (app *App) updateLoop(ctx context.Context) {
 }
 
 func (app *App) updatePRs(ctx context.Context) {
-	incoming, outgoing, err := app.fetchPRsInternal(ctx, false)
+	incoming, outgoing, err := app.fetchPRsInternal(ctx)
 	if err != nil {
 		log.Printf("Error fetching PRs: %v", err)
 		app.mu.Lock()
@@ -448,42 +440,16 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.updateMenu(ctx)
 }
 
-// updateMenu rebuilds the menu only when content actually changes.
+// updateMenu rebuilds the menu every time - simple and reliable.
 func (app *App) updateMenu(ctx context.Context) {
-	app.mu.RLock()
-	// Skip menu updates while Turn data is still loading
-	if app.loadingTurnData {
-		app.mu.RUnlock()
-		return
-	}
-
-	// Build current menu titles for comparison
-	var currentTitles []string
-	for i := range app.incoming {
-		currentTitles = append(currentTitles, fmt.Sprintf("IN:%s #%d", app.incoming[i].Repository, app.incoming[i].Number))
-	}
-	for i := range app.outgoing {
-		currentTitles = append(currentTitles, fmt.Sprintf("OUT:%s #%d", app.outgoing[i].Repository, app.outgoing[i].Number))
-	}
-
-	lastTitles := app.lastMenuTitles
-	app.mu.RUnlock()
-
-	// Only rebuild if titles changed
-	if reflect.DeepEqual(lastTitles, currentTitles) {
-		return
-	}
-
-	app.mu.Lock()
-	app.lastMenuTitles = currentTitles
-	app.mu.Unlock()
-
+	// Always rebuild - it's just a small menu, performance is not an issue
+	log.Println("[MENU] Rebuilding menu")
 	app.rebuildMenu(ctx)
 }
 
 // updatePRsWithWait fetches PRs and waits for Turn data before building initial menu.
 func (app *App) updatePRsWithWait(ctx context.Context) {
-	incoming, outgoing, err := app.fetchPRsInternal(ctx, true)
+	incoming, outgoing, err := app.fetchPRsInternal(ctx)
 	if err != nil {
 		log.Printf("Error fetching PRs: %v", err)
 		app.mu.Lock()
@@ -564,7 +530,12 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled boo
 		log.Printf("[BROWSER] Auto-opening newly blocked PR: %s #%d - %s",
 			pr.Repository, pr.Number, pr.URL)
 		// Use strict validation for auto-opened URLs
-		if err := openURLAutoStrict(ctx, pr.URL); err != nil {
+		// Validate against strict GitHub PR URL pattern for auto-opening
+		if err := validateGitHubPRURL(pr.URL); err != nil {
+			log.Printf("Auto-open strict validation failed for %s: %v", sanitizeForLog(pr.URL), err)
+			return
+		}
+		if err := openURL(ctx, pr.URL); err != nil {
 			log.Printf("[BROWSER] Failed to auto-open PR %s: %v", pr.URL, err)
 		} else {
 			app.browserRateLimiter.RecordOpen(pr.URL)
@@ -671,30 +642,44 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 			continue
 		}
 
-		if incoming[i].NeedsReview {
-			currentBlocked[incoming[i].URL] = true
-			// Track when first blocked
-			if blockedTime, exists := blockedTimes[incoming[i].URL]; exists {
-				newBlockedTimes[incoming[i].URL] = blockedTime
-				incoming[i].FirstBlockedAt = blockedTime
-			} else if !previousBlocked[incoming[i].URL] {
-				// Newly blocked PR
-				newBlockedTimes[incoming[i].URL] = now
-				incoming[i].FirstBlockedAt = now
-				log.Printf("[BLOCKED] Setting FirstBlockedAt for incoming PR: %s #%d at %v",
-					incoming[i].Repository, incoming[i].Number, now)
+		if !incoming[i].NeedsReview {
+			continue
+		}
 
-				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
-				isStale := incoming[i].UpdatedAt.Before(staleThreshold)
-				if hideStaleIncoming && isStale {
-					log.Printf("[BLOCKED] New incoming PR blocked (stale, skipping): %s #%d - %s",
-						incoming[i].Repository, incoming[i].Number, incoming[i].Title)
-				} else {
-					log.Printf("[BLOCKED] New incoming PR blocked: %s #%d - %s",
-						incoming[i].Repository, incoming[i].Number, incoming[i].Title)
-					app.notifyWithSound(ctx, incoming[i], true, &playedHonk)
-					app.tryAutoOpenPR(ctx, incoming[i], autoBrowserEnabled, startTime)
-				}
+		pr := &incoming[i]
+		currentBlocked[pr.URL] = true
+
+		if previousBlocked[pr.URL] {
+			// PR was blocked before and is still blocked - preserve timestamp
+			if blockedTime, exists := blockedTimes[pr.URL]; exists {
+				newBlockedTimes[pr.URL] = blockedTime
+				pr.FirstBlockedAt = blockedTime
+				log.Printf("[BLOCKED] Preserving FirstBlockedAt for still-blocked incoming PR: %s #%d (blocked since %v, %v ago)",
+					pr.Repository, pr.Number, blockedTime, time.Since(blockedTime))
+			} else {
+				// Edge case: PR was marked as blocked but timestamp is missing
+				log.Printf("[BLOCKED] WARNING: Missing timestamp for previously blocked incoming PR: %s #%d - setting new timestamp",
+					pr.Repository, pr.Number)
+				newBlockedTimes[pr.URL] = now
+				pr.FirstBlockedAt = now
+			}
+		} else {
+			// PR is newly blocked (wasn't blocked in previous check)
+			newBlockedTimes[pr.URL] = now
+			pr.FirstBlockedAt = now
+			log.Printf("[BLOCKED] Setting FirstBlockedAt for incoming PR: %s #%d at %v",
+				pr.Repository, pr.Number, now)
+
+			// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
+			isStale := pr.UpdatedAt.Before(staleThreshold)
+			if hideStaleIncoming && isStale {
+				log.Printf("[BLOCKED] New incoming PR blocked (stale, skipping): %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+			} else {
+				log.Printf("[BLOCKED] New incoming PR blocked: %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+				app.notifyWithSound(ctx, *pr, true, &playedHonk)
+				app.tryAutoOpenPR(ctx, *pr, autoBrowserEnabled, startTime)
 			}
 		}
 	}
@@ -707,34 +692,48 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 			continue
 		}
 
-		if outgoing[i].IsBlocked {
-			currentBlocked[outgoing[i].URL] = true
-			// Track when first blocked
-			if blockedTime, exists := blockedTimes[outgoing[i].URL]; exists {
-				newBlockedTimes[outgoing[i].URL] = blockedTime
-				outgoing[i].FirstBlockedAt = blockedTime
-			} else if !previousBlocked[outgoing[i].URL] {
-				// Newly blocked PR
-				newBlockedTimes[outgoing[i].URL] = now
-				outgoing[i].FirstBlockedAt = now
-				log.Printf("[BLOCKED] Setting FirstBlockedAt for outgoing PR: %s #%d at %v",
-					outgoing[i].Repository, outgoing[i].Number, now)
+		if !outgoing[i].IsBlocked {
+			continue
+		}
 
-				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
-				isStale := outgoing[i].UpdatedAt.Before(staleThreshold)
-				if hideStaleIncoming && isStale {
-					log.Printf("[BLOCKED] New outgoing PR blocked (stale, skipping): %s #%d - %s",
-						outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
-				} else {
-					// Add delay if we already played honk sound
-					if playedHonk && !playedJet {
-						time.Sleep(2 * time.Second)
-					}
-					log.Printf("[BLOCKED] New outgoing PR blocked: %s #%d - %s",
-						outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
-					app.notifyWithSound(ctx, outgoing[i], false, &playedJet)
-					app.tryAutoOpenPR(ctx, outgoing[i], autoBrowserEnabled, startTime)
+		pr := &outgoing[i]
+		currentBlocked[pr.URL] = true
+
+		if previousBlocked[pr.URL] {
+			// PR was blocked before and is still blocked - preserve timestamp
+			if blockedTime, exists := blockedTimes[pr.URL]; exists {
+				newBlockedTimes[pr.URL] = blockedTime
+				pr.FirstBlockedAt = blockedTime
+				log.Printf("[BLOCKED] Preserving FirstBlockedAt for still-blocked outgoing PR: %s #%d (blocked since %v, %v ago)",
+					pr.Repository, pr.Number, blockedTime, time.Since(blockedTime))
+			} else {
+				// Edge case: PR was marked as blocked but timestamp is missing
+				log.Printf("[BLOCKED] WARNING: Missing timestamp for previously blocked outgoing PR: %s #%d - setting new timestamp",
+					pr.Repository, pr.Number)
+				newBlockedTimes[pr.URL] = now
+				pr.FirstBlockedAt = now
+			}
+		} else {
+			// PR is newly blocked (wasn't blocked in previous check)
+			newBlockedTimes[pr.URL] = now
+			pr.FirstBlockedAt = now
+			log.Printf("[BLOCKED] Setting FirstBlockedAt for outgoing PR: %s #%d at %v",
+				pr.Repository, pr.Number, now)
+
+			// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
+			isStale := pr.UpdatedAt.Before(staleThreshold)
+			if hideStaleIncoming && isStale {
+				log.Printf("[BLOCKED] New outgoing PR blocked (stale, skipping): %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+			} else {
+				// Add delay if we already played honk sound
+				if playedHonk && !playedJet {
+					time.Sleep(2 * time.Second)
 				}
+				log.Printf("[BLOCKED] New outgoing PR blocked: %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+				app.notifyWithSound(ctx, *pr, false, &playedJet)
+				app.tryAutoOpenPR(ctx, *pr, autoBrowserEnabled, startTime)
 			}
 		}
 	}

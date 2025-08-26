@@ -76,10 +76,10 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		return nil
 	},
 		retry.Attempts(maxRetries),
-		retry.DelayType(retry.BackOffDelay),
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
 		retry.MaxDelay(maxRetryDelay),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("Turn API retry %d/%d for %s: %v", n+1, maxRetries, url, err)
+			log.Printf("[TURN] API retry %d/%d for %s: %v", n+1, maxRetries, url, err)
 		}),
 		retry.Context(ctx),
 	)

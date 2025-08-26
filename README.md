@@ -76,7 +76,7 @@ We don't yet persist fine-grained tokens to disk - PR's welcome!
 
 ## Pricing
 
-- Review Goose is free forever for public repositories ❤️
+- Free forever for public repositories ❤️
 - Private repo access will soon be a supporter-only feature to ensure the goose is fed. ($2.56/mo is our recommendation)
 
 ## Privacy
