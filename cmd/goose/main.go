@@ -97,6 +97,8 @@ type App struct {
 	enableAutoBrowser   bool
 	hideStaleIncoming   bool
 	noCache             bool
+	hiddenOrgs          map[string]bool
+	seenOrgs            map[string]bool
 }
 
 func loadCurrentUser(ctx context.Context, app *App) {
@@ -219,6 +221,8 @@ func main() {
 		enableAutoBrowser:  false, // Default to false for safety
 		browserRateLimiter: NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
 		startTime:          time.Now(),
+		seenOrgs:           make(map[string]bool),
+		hiddenOrgs:         make(map[string]bool),
 	}
 
 	// Load saved settings
@@ -626,6 +630,12 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 		}
 	}
 
+	// Get hidden orgs for filtering
+	hiddenOrgs := make(map[string]bool)
+	for org, hidden := range app.hiddenOrgs {
+		hiddenOrgs[org] = hidden
+	}
+
 	// Log any removed entries
 	removedCount := 0
 	for url := range app.blockedPRTimes {
@@ -655,6 +665,12 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 
 	// Check incoming PRs
 	for i := range incoming {
+		// Skip PRs from hidden orgs for notifications
+		org := extractOrgFromRepo(incoming[i].Repository)
+		if org != "" && hiddenOrgs[org] {
+			continue
+		}
+
 		if incoming[i].NeedsReview {
 			currentBlocked[incoming[i].URL] = true
 			// Track when first blocked
@@ -685,6 +701,12 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 
 	// Check outgoing PRs
 	for i := range outgoing {
+		// Skip PRs from hidden orgs for notifications
+		org := extractOrgFromRepo(outgoing[i].Repository)
+		if org != "" && hiddenOrgs[org] {
+			continue
+		}
+
 		if outgoing[i].IsBlocked {
 			currentBlocked[outgoing[i].URL] = true
 			// Track when first blocked

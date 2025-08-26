@@ -10,9 +10,10 @@ import (
 
 // Settings represents persistent user settings.
 type Settings struct {
-	EnableAudioCues   bool `json:"enable_audio_cues"`
-	HideStale         bool `json:"hide_stale"`
-	EnableAutoBrowser bool `json:"enable_auto_browser"`
+	EnableAudioCues   bool            `json:"enable_audio_cues"`
+	HideStale         bool            `json:"hide_stale"`
+	EnableAutoBrowser bool            `json:"enable_auto_browser"`
+	HiddenOrgs        map[string]bool `json:"hidden_orgs"`
 }
 
 // settingsDir returns the configuration directory for settings.
@@ -33,6 +34,7 @@ func (app *App) loadSettings() {
 		app.enableAudioCues = true
 		app.hideStaleIncoming = true
 		app.enableAutoBrowser = false
+		app.hiddenOrgs = make(map[string]bool)
 		return
 	}
 
@@ -47,6 +49,7 @@ func (app *App) loadSettings() {
 		app.enableAudioCues = true
 		app.hideStaleIncoming = true
 		app.enableAutoBrowser = false
+		app.hiddenOrgs = make(map[string]bool)
 		return
 	}
 
@@ -57,14 +60,20 @@ func (app *App) loadSettings() {
 		app.enableAudioCues = true
 		app.hideStaleIncoming = true
 		app.enableAutoBrowser = false
+		app.hiddenOrgs = make(map[string]bool)
 		return
 	}
 
 	app.enableAudioCues = settings.EnableAudioCues
 	app.hideStaleIncoming = settings.HideStale
 	app.enableAutoBrowser = settings.EnableAutoBrowser
-	log.Printf("Loaded settings: audio_cues=%v, hide_stale=%v, auto_browser=%v",
-		app.enableAudioCues, app.hideStaleIncoming, app.enableAutoBrowser)
+	if settings.HiddenOrgs != nil {
+		app.hiddenOrgs = settings.HiddenOrgs
+	} else {
+		app.hiddenOrgs = make(map[string]bool)
+	}
+	log.Printf("Loaded settings: audio_cues=%v, hide_stale=%v, auto_browser=%v, hidden_orgs=%d",
+		app.enableAudioCues, app.hideStaleIncoming, app.enableAutoBrowser, len(app.hiddenOrgs))
 }
 
 // saveSettings saves current settings to disk.
@@ -80,6 +89,7 @@ func (app *App) saveSettings() {
 		EnableAudioCues:   app.enableAudioCues,
 		HideStale:         app.hideStaleIncoming,
 		EnableAutoBrowser: app.enableAutoBrowser,
+		HiddenOrgs:        app.hiddenOrgs,
 	}
 	app.mu.RUnlock()
 
@@ -102,6 +112,6 @@ func (app *App) saveSettings() {
 		return
 	}
 
-	log.Printf("Saved settings: audio_cues=%v, hide_stale=%v, auto_browser=%v",
-		settings.EnableAudioCues, settings.HideStale, settings.EnableAutoBrowser)
+	log.Printf("Saved settings: audio_cues=%v, hide_stale=%v, auto_browser=%v, hidden_orgs=%d",
+		settings.EnableAudioCues, settings.HideStale, settings.EnableAutoBrowser, len(settings.HiddenOrgs))
 }
