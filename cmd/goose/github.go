@@ -199,10 +199,10 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 		return nil
 	},
 		retry.Attempts(maxRetries),
-		retry.DelayType(retry.BackOffDelay),
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
 		retry.MaxDelay(maxRetryDelay),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("GitHub Search.Issues retry %d/%d: %v", n+1, maxRetries, err)
+			log.Printf("[GITHUB] Search.Issues retry %d/%d: %v", n+1, maxRetries, err)
 		}),
 		retry.Context(ctx),
 	)

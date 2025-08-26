@@ -86,6 +86,7 @@ type App struct {
 	authError           string
 	pendingTurnResults  []TurnResult
 	lastMenuTitles      []string
+	lastMenuRebuild     time.Time
 	incoming            []PR
 	outgoing            []PR
 	updateInterval      time.Duration
@@ -121,10 +122,10 @@ func loadCurrentUser(ctx context.Context, app *App) {
 		return nil
 	},
 		retry.Attempts(maxRetries),
-		retry.DelayType(retry.BackOffDelay),
+		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
 		retry.MaxDelay(maxRetryDelay),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("GitHub Users.Get retry %d/%d: %v", n+1, maxRetries, err)
+			log.Printf("[GITHUB] Users.Get retry %d/%d: %v", n+1, maxRetries, err)
 		}),
 		retry.Context(ctx),
 	)
@@ -449,12 +450,50 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.updateMenu(ctx)
 }
 
+// hasIconAboutToExpire checks if any PR icon is near its expiration time.
+// Returns true if any blocked PR has been blocked for approximately 25 minutes.
+func (app *App) hasIconAboutToExpire() bool {
+	now := time.Now()
+	windowStart := blockedPRIconDuration - time.Minute
+	windowEnd := blockedPRIconDuration + time.Minute
+
+	// Check incoming PRs
+	for i := range app.incoming {
+		if !app.incoming[i].NeedsReview || app.incoming[i].FirstBlockedAt.IsZero() {
+			continue
+		}
+		age := now.Sub(app.incoming[i].FirstBlockedAt)
+		// Icon expires at blockedPRIconDuration; check if we're within a minute of that
+		if age > windowStart && age < windowEnd {
+			log.Printf("[MENU] Incoming PR %s #%d icon expiring soon (blocked %v ago)",
+				app.incoming[i].Repository, app.incoming[i].Number, age.Round(time.Second))
+			return true
+		}
+	}
+
+	// Check outgoing PRs
+	for i := range app.outgoing {
+		if !app.outgoing[i].IsBlocked || app.outgoing[i].FirstBlockedAt.IsZero() {
+			continue
+		}
+		age := now.Sub(app.outgoing[i].FirstBlockedAt)
+		if age > windowStart && age < windowEnd {
+			log.Printf("[MENU] Outgoing PR %s #%d icon expiring soon (blocked %v ago)",
+				app.outgoing[i].Repository, app.outgoing[i].Number, age.Round(time.Second))
+			return true
+		}
+	}
+
+	return false
+}
+
 // updateMenu rebuilds the menu only when content actually changes.
 func (app *App) updateMenu(ctx context.Context) {
 	app.mu.RLock()
 	// Skip menu updates while Turn data is still loading
 	if app.loadingTurnData {
 		app.mu.RUnlock()
+		log.Println("[MENU] Skipping menu update: Turn data still loading")
 		return
 	}
 
@@ -468,18 +507,33 @@ func (app *App) updateMenu(ctx context.Context) {
 	}
 
 	lastTitles := app.lastMenuTitles
+	lastRebuild := app.lastMenuRebuild
+	hasExpiringIcons := app.hasIconAboutToExpire()
 	app.mu.RUnlock()
 
-	// Only rebuild if titles changed
-	if reflect.DeepEqual(lastTitles, currentTitles) {
-		return
+	// Rebuild if:
+	// 1. PR list changed, OR
+	// 2. An icon is about to expire and we haven't rebuilt recently
+	titlesChanged := !reflect.DeepEqual(lastTitles, currentTitles)
+	timeSinceLastRebuild := time.Since(lastRebuild)
+	iconUpdateDue := hasExpiringIcons && timeSinceLastRebuild > 30*time.Second
+
+	if titlesChanged || iconUpdateDue {
+		app.mu.Lock()
+		if titlesChanged {
+			app.lastMenuTitles = currentTitles
+			log.Printf("[MENU] PR list changed, triggering rebuild (was %d items, now %d items)",
+				len(lastTitles), len(currentTitles))
+		}
+		app.lastMenuRebuild = time.Now()
+		app.mu.Unlock()
+
+		if iconUpdateDue {
+			log.Printf("[MENU] Rebuilding menu: party popper icon expiring (last rebuild: %v ago)",
+				timeSinceLastRebuild.Round(time.Second))
+		}
+		app.rebuildMenu(ctx)
 	}
-
-	app.mu.Lock()
-	app.lastMenuTitles = currentTitles
-	app.mu.Unlock()
-
-	app.rebuildMenu(ctx)
 }
 
 // updatePRsWithWait fetches PRs and waits for Turn data before building initial menu.
