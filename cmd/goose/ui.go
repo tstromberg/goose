@@ -113,6 +113,12 @@ func (app *App) countPRs() PRCounts {
 	staleThreshold := now.Add(-stalePRThreshold)
 
 	for i := range app.incoming {
+		// Check if org is hidden
+		org := extractOrgFromRepo(app.incoming[i].Repository)
+		if org != "" && app.hiddenOrgs[org] {
+			continue
+		}
+
 		if !app.hideStaleIncoming || app.incoming[i].UpdatedAt.After(staleThreshold) {
 			incomingCount++
 			if app.incoming[i].NeedsReview {
@@ -122,6 +128,12 @@ func (app *App) countPRs() PRCounts {
 	}
 
 	for i := range app.outgoing {
+		// Check if org is hidden
+		org := extractOrgFromRepo(app.outgoing[i].Repository)
+		if org != "" && app.hiddenOrgs[org] {
+			continue
+		}
+
 		if !app.hideStaleIncoming || app.outgoing[i].UpdatedAt.After(staleThreshold) {
 			outgoingCount++
 			if app.outgoing[i].IsBlocked {
@@ -198,11 +210,26 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	// Sort PRs with blocked ones first
 	sortedPRs := sortPRsBlockedFirst(prs)
 
+	// Get hidden orgs with proper locking
+	app.mu.RLock()
+	hiddenOrgs := make(map[string]bool)
+	for org, hidden := range app.hiddenOrgs {
+		hiddenOrgs[org] = hidden
+	}
+	hideStale := app.hideStaleIncoming
+	app.mu.RUnlock()
+
 	// Add PR items in sorted order
 	for i := range sortedPRs {
 		// Apply filters
+		// Skip PRs from hidden orgs
+		org := extractOrgFromRepo(sortedPRs[i].Repository)
+		if org != "" && hiddenOrgs[org] {
+			continue
+		}
+
 		// Skip stale PRs if configured
-		if app.hideStaleIncoming && sortedPRs[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
+		if hideStale && sortedPRs[i].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
 			continue
 		}
 
@@ -361,6 +388,72 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	// Add static menu items
 
 	systray.AddSeparator()
+
+	// Hide orgs submenu
+	// Add 'Hide orgs' submenu
+	hideOrgsMenu := systray.AddMenuItem("Hide orgs", "Select organizations to hide PRs from")
+
+	// Get combined list of seen orgs and hidden orgs
+	app.mu.RLock()
+	orgSet := make(map[string]bool)
+	// Add all seen orgs
+	for org := range app.seenOrgs {
+		orgSet[org] = true
+	}
+	// Add all hidden orgs (in case they're not in seenOrgs yet)
+	for org := range app.hiddenOrgs {
+		orgSet[org] = true
+	}
+	// Convert to sorted slice
+	orgs := make([]string, 0, len(orgSet))
+	for org := range orgSet {
+		orgs = append(orgs, org)
+	}
+	hiddenOrgs := make(map[string]bool)
+	for org, hidden := range app.hiddenOrgs {
+		hiddenOrgs[org] = hidden
+	}
+	app.mu.RUnlock()
+
+	sort.Strings(orgs)
+
+	if len(orgs) == 0 {
+		noOrgsItem := hideOrgsMenu.AddSubMenuItem("No organizations found", "")
+		noOrgsItem.Disable()
+	} else {
+		// Add checkbox items for each org
+		for _, org := range orgs {
+			orgName := org // Capture for closure
+			orgItem := hideOrgsMenu.AddSubMenuItem(orgName, "")
+
+			// Check if org is currently hidden
+			if hiddenOrgs[orgName] {
+				orgItem.Check()
+			}
+
+			orgItem.Click(func() {
+				app.mu.Lock()
+				if app.hiddenOrgs[orgName] {
+					delete(app.hiddenOrgs, orgName)
+					orgItem.Uncheck()
+					log.Printf("[SETTINGS] Unhiding org: %s", orgName)
+				} else {
+					app.hiddenOrgs[orgName] = true
+					orgItem.Check()
+					log.Printf("[SETTINGS] Hiding org: %s", orgName)
+				}
+				// Clear menu titles to force rebuild
+				app.lastMenuTitles = nil
+				app.mu.Unlock()
+
+				// Save settings
+				app.saveSettings()
+
+				// Rebuild menu to reflect changes
+				app.rebuildMenu(ctx)
+			})
+		}
+	}
 
 	// Hide stale PRs
 	// Add 'Hide stale PRs' option

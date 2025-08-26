@@ -20,30 +20,39 @@ Lives in your menubar like a tiny waterfowl of productivity shame, watching your
 - **🧠 Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
 - **⭐ Auto-start** on login (macOS)
 - **🔔 Auto-open** incoming PRs in your browser (off by default, rate-limited)
+- **🎯 Org Filtering** for orgs you may not care about in a home or work context
 
-You can also visit the web-based equivalent at https://dash.ready-to-review.dev/
+You can also visit the web-based dashboard at https://dash.ready-to-review.dev/
 
-## macOS Quick Start ⚡ (How to Get Honked At)
+## Dependencies
 
-### Option 1: Authenticating using GitHub CLI
+* [go](https://go.dev/) 1.23.4 or higher
+* [gh](https://cli.github.com/), AKA the GitHub command-line utility
 
-Install dependencies: the [GitHub CLI, aka "gh"](https://cli.github.com/) and [Go](https://go.dev/):
+## macOS Quick Start ⚡ (Get Honked At)
+
+Install dependencies:
 
 ```bash
 brew install gh go
-gh auth login
 ```
 
-Then summon the goose:
+Confirm that `gh` is properly authenticated:
+
+```
+gh auth status || gh auth login
+```
+
+Build & run:
 
 ```bash
 git clone https://github.com/ready-to-review/goose.git
 cd goose && make run
 ```
 
-`make run` will cause the goose to implant itself into `/Applications/Review Goose.app` for future use. To be persistently annoyed by the goose every time you start your computer, click the `Start at Login` menu item.
+This will will cause the goose to implant itself into `/Applications/Review Goose.app` for future invocations. To be persistently annoyed every time you login, click the `Start at Login` menu item.
 
-### Option 2: Using a fine-grained access token
+### Using a fine-grained access token
 
 If you want more control over which repositories the goose can access, you can use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with the following permissions:
 
@@ -53,33 +62,31 @@ If you want more control over which repositories the goose can access, you can u
 You can then use the token like so:
 
 ```bash
-export GITHUB_TOKEN=your_token_here
-git clone https://github.com/ready-to-review/goose.git
-cd goose && make run
+env GITHUB_TOKEN=your_token_here goose
 ```
 
-We don't yet try to persist fine-grained tokens to disk - PR's welcome!
+We don't yet persist fine-grained tokens to disk - PR's welcome!
 
 ## Known Issues
 
-- Blocking logic isn't 100% accurate - issues welcome!
+- Visual notifications won't work on macOS until we release signed binaries.
+- Blocking turn logic isn't 100% accurate - open an issue if you find something.
 - The goose may not stop honking until you review your PRs
-- Visual notifications won't work on macOS until we sign the binary
 - Linux, BSD, and Windows support is implemented but untested
 
 ## Pricing
 
-The Goose is part of the [codeGROOVE](https://codegroove.dev) developer acceleration platform:
-- **FREE forever** for open-source or public repositories
-- Coming soon: GitHub Sponsors gain access to private repos ($2.56/mo recommended)
+- Review Goose is free forever for public repositories ❤️
+- Private repo access will soon be a supporter-only feature to ensure the goose is fed. ($2.56/mo is our recommendation)
 
 ## Privacy
 
 - Your GitHub token is used to authenticate against GitHub and codeGROOVE's API for state-machine & natural-language processing
-- Your GitHub token is never stored or logged,
-- PR metadata may be locally or remotely cached for up to 20 days (performance)
+- Your GitHub token is never stored or logged.
+- PR metadata may be cached locally & remotely for up to 20 days
+- No data is resold to anyone. We don't even want it.
 - No telemetry is collected
 
 ---
 
-Built with ❤️ by [codeGROOVE](https://codegroove.dev/) - PRs welcome!
+Built with 🪿 by [codeGROOVE](https://codegroove.dev/) - PRs welcome!

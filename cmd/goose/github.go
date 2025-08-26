@@ -20,6 +20,15 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// extractOrgFromRepo extracts the organization name from a repository path like "org/repo".
+func extractOrgFromRepo(repo string) string {
+	parts := strings.Split(repo, "/")
+	if len(parts) >= 1 {
+		return parts[0]
+	}
+	return ""
+}
+
 // initClients initializes GitHub and Turn API clients.
 func (app *App) initClients(ctx context.Context) error {
 	token, err := app.token(ctx)
@@ -320,6 +329,17 @@ func (app *App) fetchPRsInternal(ctx context.Context, waitForTurn bool) (incomin
 			continue
 		}
 		repo := strings.TrimPrefix(issue.GetRepositoryURL(), "https://api.github.com/repos/")
+
+		// Extract org and track it (but don't filter here)
+		org := extractOrgFromRepo(repo)
+		if org != "" {
+			app.mu.Lock()
+			if !app.seenOrgs[org] {
+				log.Printf("[ORG] Discovered new organization: %s", org)
+			}
+			app.seenOrgs[org] = true
+			app.mu.Unlock()
+		}
 
 		pr := PR{
 			Title:      issue.GetTitle(),
