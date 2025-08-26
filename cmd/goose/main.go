@@ -37,6 +37,7 @@ const (
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
 	defaultUpdateInterval     = 1 * time.Minute
+	blockedPRIconDuration     = 25 * time.Minute
 	maxRetryDelay             = 2 * time.Minute
 	maxRetries                = 10
 	minorFailureThreshold     = 3
@@ -655,64 +656,92 @@ func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
 
 	// Check incoming PRs
 	for i := range incoming {
-		if incoming[i].NeedsReview {
-			currentBlocked[incoming[i].URL] = true
-			// Track when first blocked
-			if blockedTime, exists := blockedTimes[incoming[i].URL]; exists {
-				newBlockedTimes[incoming[i].URL] = blockedTime
-				incoming[i].FirstBlockedAt = blockedTime
-			} else if !previousBlocked[incoming[i].URL] {
-				// Newly blocked PR
-				newBlockedTimes[incoming[i].URL] = now
-				incoming[i].FirstBlockedAt = now
-				log.Printf("[BLOCKED] Setting FirstBlockedAt for incoming PR: %s #%d at %v",
-					incoming[i].Repository, incoming[i].Number, now)
+		if !incoming[i].NeedsReview {
+			continue
+		}
 
-				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
-				isStale := incoming[i].UpdatedAt.Before(staleThreshold)
-				if hideStaleIncoming && isStale {
-					log.Printf("[BLOCKED] New incoming PR blocked (stale, skipping): %s #%d - %s",
-						incoming[i].Repository, incoming[i].Number, incoming[i].Title)
-				} else {
-					log.Printf("[BLOCKED] New incoming PR blocked: %s #%d - %s",
-						incoming[i].Repository, incoming[i].Number, incoming[i].Title)
-					app.notifyWithSound(ctx, incoming[i], true, &playedHonk)
-					app.tryAutoOpenPR(ctx, incoming[i], autoBrowserEnabled, startTime)
-				}
+		pr := &incoming[i]
+		currentBlocked[pr.URL] = true
+
+		if previousBlocked[pr.URL] {
+			// PR was blocked before and is still blocked - preserve timestamp
+			if blockedTime, exists := blockedTimes[pr.URL]; exists {
+				newBlockedTimes[pr.URL] = blockedTime
+				pr.FirstBlockedAt = blockedTime
+				log.Printf("[BLOCKED] Preserving FirstBlockedAt for still-blocked incoming PR: %s #%d (blocked since %v, %v ago)",
+					pr.Repository, pr.Number, blockedTime, time.Since(blockedTime))
+			} else {
+				// Edge case: PR was marked as blocked but timestamp is missing
+				log.Printf("[BLOCKED] WARNING: Missing timestamp for previously blocked incoming PR: %s #%d - setting new timestamp",
+					pr.Repository, pr.Number)
+				newBlockedTimes[pr.URL] = now
+				pr.FirstBlockedAt = now
+			}
+		} else {
+			// PR is newly blocked (wasn't blocked in previous check)
+			newBlockedTimes[pr.URL] = now
+			pr.FirstBlockedAt = now
+			log.Printf("[BLOCKED] Setting FirstBlockedAt for incoming PR: %s #%d at %v",
+				pr.Repository, pr.Number, now)
+
+			// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
+			isStale := pr.UpdatedAt.Before(staleThreshold)
+			if hideStaleIncoming && isStale {
+				log.Printf("[BLOCKED] New incoming PR blocked (stale, skipping): %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+			} else {
+				log.Printf("[BLOCKED] New incoming PR blocked: %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+				app.notifyWithSound(ctx, *pr, true, &playedHonk)
+				app.tryAutoOpenPR(ctx, *pr, autoBrowserEnabled, startTime)
 			}
 		}
 	}
 
 	// Check outgoing PRs
 	for i := range outgoing {
-		if outgoing[i].IsBlocked {
-			currentBlocked[outgoing[i].URL] = true
-			// Track when first blocked
-			if blockedTime, exists := blockedTimes[outgoing[i].URL]; exists {
-				newBlockedTimes[outgoing[i].URL] = blockedTime
-				outgoing[i].FirstBlockedAt = blockedTime
-			} else if !previousBlocked[outgoing[i].URL] {
-				// Newly blocked PR
-				newBlockedTimes[outgoing[i].URL] = now
-				outgoing[i].FirstBlockedAt = now
-				log.Printf("[BLOCKED] Setting FirstBlockedAt for outgoing PR: %s #%d at %v",
-					outgoing[i].Repository, outgoing[i].Number, now)
+		if !outgoing[i].IsBlocked {
+			continue
+		}
 
-				// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
-				isStale := outgoing[i].UpdatedAt.Before(staleThreshold)
-				if hideStaleIncoming && isStale {
-					log.Printf("[BLOCKED] New outgoing PR blocked (stale, skipping): %s #%d - %s",
-						outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
-				} else {
-					// Add delay if we already played honk sound
-					if playedHonk && !playedJet {
-						time.Sleep(2 * time.Second)
-					}
-					log.Printf("[BLOCKED] New outgoing PR blocked: %s #%d - %s",
-						outgoing[i].Repository, outgoing[i].Number, outgoing[i].Title)
-					app.notifyWithSound(ctx, outgoing[i], false, &playedJet)
-					app.tryAutoOpenPR(ctx, outgoing[i], autoBrowserEnabled, startTime)
+		pr := &outgoing[i]
+		currentBlocked[pr.URL] = true
+
+		if previousBlocked[pr.URL] {
+			// PR was blocked before and is still blocked - preserve timestamp
+			if blockedTime, exists := blockedTimes[pr.URL]; exists {
+				newBlockedTimes[pr.URL] = blockedTime
+				pr.FirstBlockedAt = blockedTime
+				log.Printf("[BLOCKED] Preserving FirstBlockedAt for still-blocked outgoing PR: %s #%d (blocked since %v, %v ago)",
+					pr.Repository, pr.Number, blockedTime, time.Since(blockedTime))
+			} else {
+				// Edge case: PR was marked as blocked but timestamp is missing
+				log.Printf("[BLOCKED] WARNING: Missing timestamp for previously blocked outgoing PR: %s #%d - setting new timestamp",
+					pr.Repository, pr.Number)
+				newBlockedTimes[pr.URL] = now
+				pr.FirstBlockedAt = now
+			}
+		} else {
+			// PR is newly blocked (wasn't blocked in previous check)
+			newBlockedTimes[pr.URL] = now
+			pr.FirstBlockedAt = now
+			log.Printf("[BLOCKED] Setting FirstBlockedAt for outgoing PR: %s #%d at %v",
+				pr.Repository, pr.Number, now)
+
+			// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
+			isStale := pr.UpdatedAt.Before(staleThreshold)
+			if hideStaleIncoming && isStale {
+				log.Printf("[BLOCKED] New outgoing PR blocked (stale, skipping): %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+			} else {
+				// Add delay if we already played honk sound
+				if playedHonk && !playedJet {
+					time.Sleep(2 * time.Second)
 				}
+				log.Printf("[BLOCKED] New outgoing PR blocked: %s #%d - %s",
+					pr.Repository, pr.Number, pr.Title)
+				app.notifyWithSound(ctx, *pr, false, &playedJet)
+				app.tryAutoOpenPR(ctx, *pr, autoBrowserEnabled, startTime)
 			}
 		}
 	}
