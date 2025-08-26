@@ -20,8 +20,9 @@ Lives in your menubar like a tiny waterfowl of productivity shame, watching your
 - **🧠 Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
 - **⭐ Auto-start** on login (macOS)
 - **🔔 Auto-open** incoming PRs in your browser (off by default, rate-limited)
+- **🎯 Org Filtering** for orgs you may not care about in a home or work context
 
-You can also visit the web-based equivalent at https://dash.ready-to-review.dev/
+You can also visit the web-based dashboard at https://dash.ready-to-review.dev/
 
 ## macOS Quick Start ⚡ (How to Get Honked At)
 
@@ -69,9 +70,8 @@ We don't yet try to persist fine-grained tokens to disk - PR's welcome!
 
 ## Pricing
 
-The Goose is part of the [codeGROOVE](https://codegroove.dev) developer acceleration platform:
-- **FREE forever** for open-source or public repositories
-- Coming soon: GitHub Sponsors gain access to private repos ($2.56/mo recommended)
+- Review Goose is free forever for usage with public repositories.
+- We will soon begin charging a nominal fee ($2.56/mo) for access to private repos (the goose has to eat)
 
 ## Privacy
 
