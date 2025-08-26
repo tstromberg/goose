@@ -659,7 +659,8 @@ func (app *App) fetchTurnDataAsync(ctx context.Context, issues []*github.Issue, 
 		app.checkForNewlyBlockedPRs(ctx)
 		// UI updates are handled inside checkForNewlyBlockedPRs
 	} else {
-		// No changes, but still update tray title in case of initial load
-		app.setTrayTitle()
+		// No PR data changes, but still need to update menu in case icons expired
+		// (e.g., party popper changing to bullet after 25 minutes)
+		app.updateMenu(ctx)
 	}
 }
