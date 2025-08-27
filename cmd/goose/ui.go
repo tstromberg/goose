@@ -388,7 +388,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Rebuild entire menu
 
 	// Clear all existing menu items
-	systray.ResetMenu()
+	app.systrayInterface.ResetMenu()
 
 	// Check for auth error first
 	if app.authError != "" {

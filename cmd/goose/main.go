@@ -87,6 +87,7 @@ type App struct {
 	enableAutoBrowser   bool
 	hideStaleIncoming   bool
 	noCache             bool
+	systrayInterface    SystrayInterface // For mocking systray operations in tests
 	hiddenOrgs          map[string]bool
 	seenOrgs            map[string]bool
 
@@ -215,6 +216,7 @@ func main() {
 		enableAutoBrowser:  false, // Default to false for safety
 		browserRateLimiter: NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
 		startTime:          startTime,
+		systrayInterface:   &RealSystray{}, // Use real systray implementation
 		seenOrgs:           make(map[string]bool),
 		hiddenOrgs:         make(map[string]bool),
 		// Deprecated fields for test compatibility
