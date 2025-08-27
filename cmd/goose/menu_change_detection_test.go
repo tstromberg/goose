@@ -12,13 +12,13 @@ import (
 func TestMenuChangeDetection(t *testing.T) {
 	// Create app with test data
 	app := &App{
-		mu:                  sync.RWMutex{},
-		stateManager:        NewPRStateManager(time.Now()),
-		hiddenOrgs:          make(map[string]bool),
-		seenOrgs:            make(map[string]bool),
-		blockedPRTimes:      make(map[string]time.Time),
-		browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
-		systrayInterface:    &MockSystray{},
+		mu:                 sync.RWMutex{},
+		stateManager:       NewPRStateManager(time.Now()),
+		hiddenOrgs:         make(map[string]bool),
+		seenOrgs:           make(map[string]bool),
+		blockedPRTimes:     make(map[string]time.Time),
+		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		systrayInterface:   &MockSystray{},
 		incoming: []PR{
 			{Repository: "org1/repo1", Number: 1, Title: "Fix bug", URL: "https://github.com/org1/repo1/pull/1", NeedsReview: true, UpdatedAt: time.Now()},
 			{Repository: "org2/repo2", Number: 2, Title: "Add feature", URL: "https://github.com/org2/repo2/pull/2", NeedsReview: false, UpdatedAt: time.Now()},
@@ -105,15 +105,15 @@ func TestMenuChangeDetection(t *testing.T) {
 func TestFirstRunMenuRebuildBug(t *testing.T) {
 	// Create app simulating initial state
 	app := &App{
-		mu:                  sync.RWMutex{},
-		stateManager:        NewPRStateManager(time.Now()),
-		hiddenOrgs:          make(map[string]bool),
-		seenOrgs:            make(map[string]bool),
-		blockedPRTimes:      make(map[string]time.Time),
-		browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
-		menuInitialized:     false,
-		systrayInterface:    &MockSystray{},
-		lastMenuTitles:      nil, // This is nil on first run - the bug condition
+		mu:                 sync.RWMutex{},
+		stateManager:       NewPRStateManager(time.Now()),
+		hiddenOrgs:         make(map[string]bool),
+		seenOrgs:           make(map[string]bool),
+		blockedPRTimes:     make(map[string]time.Time),
+		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		menuInitialized:    false,
+		systrayInterface:   &MockSystray{},
+		lastMenuTitles:     nil, // This is nil on first run - the bug condition
 		incoming: []PR{
 			{Repository: "test/repo", Number: 1, Title: "Test PR", URL: "https://github.com/test/repo/pull/1"},
 		},
@@ -148,7 +148,7 @@ func TestFirstRunMenuRebuildBug(t *testing.T) {
 
 	// Test 2: Current and stored titles should be equal (no changes)
 	if !slices.Equal(currentTitles, storedTitles) {
-		t.Errorf("BUG: Titles marked as different when they're the same:\nCurrent: %v\nStored:  %v", 
+		t.Errorf("BUG: Titles marked as different when they're the same:\nCurrent: %v\nStored:  %v",
 			currentTitles, storedTitles)
 	}
 
@@ -164,13 +164,13 @@ func TestFirstRunMenuRebuildBug(t *testing.T) {
 // TestHiddenOrgChangesMenu tests that hiding/showing orgs updates menu titles
 func TestHiddenOrgChangesMenu(t *testing.T) {
 	app := &App{
-		mu:                  sync.RWMutex{},
-		stateManager:        NewPRStateManager(time.Now()),
-		hiddenOrgs:          make(map[string]bool),
-		seenOrgs:            make(map[string]bool),
-		blockedPRTimes:      make(map[string]time.Time),
-		browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
-		systrayInterface:    &MockSystray{},
+		mu:                 sync.RWMutex{},
+		stateManager:       NewPRStateManager(time.Now()),
+		hiddenOrgs:         make(map[string]bool),
+		seenOrgs:           make(map[string]bool),
+		blockedPRTimes:     make(map[string]time.Time),
+		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		systrayInterface:   &MockSystray{},
 		incoming: []PR{
 			{Repository: "org1/repo1", Number: 1, Title: "PR 1", URL: "https://github.com/org1/repo1/pull/1"},
 			{Repository: "org2/repo2", Number: 2, Title: "PR 2", URL: "https://github.com/org2/repo2/pull/2"},
@@ -186,7 +186,7 @@ func TestHiddenOrgChangesMenu(t *testing.T) {
 
 	// Generate new titles - should have fewer items
 	newTitles := app.generateMenuTitles()
-	
+
 	// Titles should be different
 	if slices.Equal(initialTitles, newTitles) {
 		t.Error("Hiding an org didn't change menu titles")
@@ -194,7 +194,7 @@ func TestHiddenOrgChangesMenu(t *testing.T) {
 
 	// Should have fewer items (org1/repo1 should be hidden)
 	if len(newTitles) >= initialCount {
-		t.Errorf("Menu should have fewer items after hiding org: got %d, started with %d", 
+		t.Errorf("Menu should have fewer items after hiding org: got %d, started with %d",
 			len(newTitles), initialCount)
 	}
 }

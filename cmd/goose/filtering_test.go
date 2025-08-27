@@ -21,7 +21,7 @@ func TestCountPRsWithHiddenOrgs(t *testing.T) {
 			"org2": true, // Hide org2
 		},
 		hideStaleIncoming: false,
-		systrayInterface: &MockSystray{}, // Use mock systray to avoid panics
+		systrayInterface:  &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	counts := app.countPRs()
@@ -58,7 +58,7 @@ func TestCountPRsWithStalePRs(t *testing.T) {
 			{Repository: "org1/repo5", IsBlocked: true, UpdatedAt: recentTime},
 		},
 		hiddenOrgs:        map[string]bool{},
-		hideStaleIncoming: true, // Hide stale PRs
+		hideStaleIncoming: true,           // Hide stale PRs
 		systrayInterface:  &MockSystray{}, // Use mock systray to avoid panics
 	}
 
@@ -101,7 +101,7 @@ func TestCountPRsWithBothFilters(t *testing.T) {
 			"org2": true,
 		},
 		hideStaleIncoming: true,
-		systrayInterface: &MockSystray{}, // Use mock systray to avoid panics
+		systrayInterface:  &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	counts := app.countPRs()

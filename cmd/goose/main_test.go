@@ -11,7 +11,9 @@ import (
 
 func TestMain(m *testing.M) {
 	// Set test mode to prevent actual sound playback during tests
-	_ = os.Setenv("GOOSE_TEST_MODE", "1")
+	if err := os.Setenv("GOOSE_TEST_MODE", "1"); err != nil {
+		panic(err)
+	}
 	os.Exit(m.Run())
 }
 
@@ -486,7 +488,7 @@ func TestGracePeriodPreventsNotifications(t *testing.T) {
 		enableAudioCues:     true,
 		initialLoadComplete: true,
 		menuInitialized:     true,
-		startTime:           time.Now(), // Just started
+		startTime:           time.Now(),     // Just started
 		systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 	}
 
@@ -672,7 +674,7 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 		initialLoadComplete: true, // Already past initial load
 		menuInitialized:     true,
 		startTime:           time.Now().Add(-35 * time.Second), // Started 35 seconds ago
-		systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
+		systrayInterface:    &MockSystray{},                    // Use mock systray to avoid panics
 	}
 
 	// Start with no blocked PRs

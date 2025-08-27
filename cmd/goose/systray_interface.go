@@ -1,8 +1,12 @@
 package main
 
-import "github.com/energye/systray"
+import (
+	"reflect"
 
-// SystrayInterface abstracts systray operations for testing
+	"github.com/energye/systray"
+)
+
+// SystrayInterface abstracts systray operations for testing.
 type SystrayInterface interface {
 	ResetMenu()
 	AddMenuItem(title, tooltip string) *systray.MenuItem
@@ -12,34 +16,34 @@ type SystrayInterface interface {
 	Quit()
 }
 
-// RealSystray implements SystrayInterface using the actual systray library
+// RealSystray implements SystrayInterface using the actual systray library.
 type RealSystray struct{}
 
-func (r *RealSystray) ResetMenu() {
+func (*RealSystray) ResetMenu() {
 	systray.ResetMenu()
 }
 
-func (r *RealSystray) AddMenuItem(title, tooltip string) *systray.MenuItem {
+func (*RealSystray) AddMenuItem(title, tooltip string) *systray.MenuItem {
 	return systray.AddMenuItem(title, tooltip)
 }
 
-func (r *RealSystray) AddSeparator() {
+func (*RealSystray) AddSeparator() {
 	systray.AddSeparator()
 }
 
-func (r *RealSystray) SetTitle(title string) {
+func (*RealSystray) SetTitle(title string) {
 	systray.SetTitle(title)
 }
 
-func (r *RealSystray) SetOnClick(fn func(menu systray.IMenu)) {
+func (*RealSystray) SetOnClick(fn func(menu systray.IMenu)) {
 	systray.SetOnClick(fn)
 }
 
-func (r *RealSystray) Quit() {
+func (*RealSystray) Quit() {
 	systray.Quit()
 }
 
-// MockSystray implements SystrayInterface for testing
+// MockSystray implements SystrayInterface for testing.
 type MockSystray struct {
 	title     string
 	menuItems []string
@@ -49,9 +53,24 @@ func (m *MockSystray) ResetMenu() {
 	m.menuItems = nil
 }
 
-func (m *MockSystray) AddMenuItem(title, tooltip string) *systray.MenuItem {
+func (m *MockSystray) AddMenuItem(title, _ string) *systray.MenuItem {
 	m.menuItems = append(m.menuItems, title)
-	return &systray.MenuItem{} // Return empty menu item for testing
+	// Create a MenuItem with initialized internal maps using reflection
+	// This prevents nil map panics when methods are called
+	item := &systray.MenuItem{}
+
+	// Use reflection to initialize internal maps if they exist
+	// This is a hack but necessary for testing
+	rv := reflect.ValueOf(item).Elem()
+	rt := rv.Type()
+	for i := 0; i < rt.NumField(); i++ {
+		field := rv.Field(i)
+		if field.Kind() == reflect.Map && field.IsNil() && field.CanSet() {
+			field.Set(reflect.MakeMap(field.Type()))
+		}
+	}
+
+	return item
 }
 
 func (m *MockSystray) AddSeparator() {
@@ -62,10 +81,10 @@ func (m *MockSystray) SetTitle(title string) {
 	m.title = title
 }
 
-func (m *MockSystray) SetOnClick(fn func(menu systray.IMenu)) {
+func (*MockSystray) SetOnClick(_ func(menu systray.IMenu)) {
 	// No-op for testing
 }
 
-func (m *MockSystray) Quit() {
+func (*MockSystray) Quit() {
 	// No-op for testing
 }

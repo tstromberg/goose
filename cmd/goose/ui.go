@@ -15,7 +15,7 @@ import (
 	"github.com/energye/systray" // needed for MenuItem type
 )
 
-// Ensure systray package is used
+// Ensure systray package is used.
 var _ *systray.MenuItem = nil
 
 // openURL safely opens a URL in the default browser after validation.
@@ -285,16 +285,17 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 // without actually building the UI. Used for change detection.
 func (app *App) generateMenuTitles() []string {
 	var titles []string
-	
+
 	// Check for auth error first
 	if app.authError != "" {
-		titles = append(titles, "⚠️ Authentication Error")
-		titles = append(titles, app.authError)
-		titles = append(titles, "To fix this issue:")
-		titles = append(titles, "1. Install GitHub CLI: brew install gh")
-		titles = append(titles, "2. Run: gh auth login")
-		titles = append(titles, "3. Or set GITHUB_TOKEN environment variable")
-		titles = append(titles, "Quit")
+		titles = append(titles,
+			"⚠️ Authentication Error",
+			app.authError,
+			"To fix this issue:",
+			"1. Install GitHub CLI: brew install gh",
+			"2. Run: gh auth login",
+			"3. Or set GITHUB_TOKEN environment variable",
+			"Quit")
 		return titles
 	}
 
@@ -322,8 +323,8 @@ func (app *App) generateMenuTitles() []string {
 			titles = append(titles, "📥 Incoming PRs")
 			titles = append(titles, app.generatePRSectionTitles(incoming, "Incoming", hiddenOrgs, hideStale)...)
 		}
-		
-		// Add outgoing PR titles  
+
+		// Add outgoing PR titles
 		if len(outgoing) > 0 {
 			titles = append(titles, "📤 Outgoing PRs")
 			titles = append(titles, app.generatePRSectionTitles(outgoing, "Outgoing", hiddenOrgs, hideStale)...)
@@ -331,44 +332,45 @@ func (app *App) generateMenuTitles() []string {
 	}
 
 	// Add settings menu items
-	titles = append(titles, "⚙️ Settings")
-	titles = append(titles, "Hide Stale Incoming PRs")
-	titles = append(titles, "Honks enabled")
-	titles = append(titles, "Auto-open in Browser")
-	titles = append(titles, "Hidden Organizations")
-	titles = append(titles, "Quit")
-	
+	titles = append(titles,
+		"⚙️ Settings",
+		"Hide Stale Incoming PRs",
+		"Honks enabled",
+		"Auto-open in Browser",
+		"Hidden Organizations",
+		"Quit")
+
 	return titles
 }
 
-// generatePRSectionTitles generates the titles for a specific PR section
+// generatePRSectionTitles generates the titles for a specific PR section.
 func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrgs map[string]bool, hideStale bool) []string {
 	var titles []string
-	
+
 	// Sort PRs by UpdatedAt (most recent first)
 	sortedPRs := make([]PR, len(prs))
 	copy(sortedPRs, prs)
 	sort.Slice(sortedPRs, func(i, j int) bool {
 		return sortedPRs[i].UpdatedAt.After(sortedPRs[j].UpdatedAt)
 	})
-	
+
 	for prIndex := range sortedPRs {
 		// Apply filters (same logic as in addPRSection)
 		org := extractOrgFromRepo(sortedPRs[prIndex].Repository)
 		if org != "" && hiddenOrgs[org] {
 			continue
 		}
-		
+
 		if hideStale && sortedPRs[prIndex].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
 			continue
 		}
 
 		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
-		
+
 		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			prState, hasState := app.stateManager.GetPRState(sortedPRs[prIndex].URL)
-			
+
 			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
@@ -379,10 +381,10 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 				title = fmt.Sprintf("• %s", title)
 			}
 		}
-		
+
 		titles = append(titles, title)
 	}
-	
+
 	return titles
 }
 

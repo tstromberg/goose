@@ -18,7 +18,7 @@ func TestMenuClickRateLimit(t *testing.T) {
 		hiddenOrgs:        make(map[string]bool),
 		seenOrgs:          make(map[string]bool),
 		lastSearchAttempt: time.Now().Add(-15 * time.Second), // 15 seconds ago
-		systrayInterface:  &MockSystray{}, // Use mock systray to avoid panics
+		systrayInterface:  &MockSystray{},                    // Use mock systray to avoid panics
 	}
 
 	// Simulate the click handler logic (without the actual UI interaction)
@@ -70,7 +70,7 @@ func TestScheduledUpdateRateLimit(t *testing.T) {
 		hiddenOrgs:        make(map[string]bool),
 		seenOrgs:          make(map[string]bool),
 		lastSearchAttempt: time.Now().Add(-5 * time.Second), // 5 seconds ago
-		systrayInterface:  &MockSystray{}, // Use mock systray to avoid panics
+		systrayInterface:  &MockSystray{},                   // Use mock systray to avoid panics
 	}
 
 	// Simulate the scheduled update logic

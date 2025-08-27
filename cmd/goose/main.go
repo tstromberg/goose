@@ -256,12 +256,12 @@ func (app *App) onReady(ctx context.Context) {
 	// Set up click handlers first (needed for both success and error states)
 	systray.SetOnClick(func(menu systray.IMenu) {
 		log.Println("Icon clicked")
-		
+
 		// Check if we can perform a forced refresh (rate limited to every 10 seconds)
 		app.mu.RLock()
 		timeSinceLastSearch := time.Since(app.lastSearchAttempt)
 		app.mu.RUnlock()
-		
+
 		if timeSinceLastSearch >= minUpdateInterval {
 			log.Printf("[CLICK] Forcing search refresh (last search %v ago)", timeSinceLastSearch)
 			go func() {
@@ -271,7 +271,7 @@ func (app *App) onReady(ctx context.Context) {
 			remainingTime := minUpdateInterval - timeSinceLastSearch
 			log.Printf("[CLICK] Rate limited - search performed %v ago, %v remaining", timeSinceLastSearch, remainingTime)
 		}
-		
+
 		if menu != nil {
 			if err := menu.ShowMenu(); err != nil {
 				log.Printf("Failed to show menu: %v", err)
@@ -350,13 +350,13 @@ func (app *App) updateLoop(ctx context.Context) {
 			app.mu.RLock()
 			timeSinceLastSearch := time.Since(app.lastSearchAttempt)
 			app.mu.RUnlock()
-			
+
 			if timeSinceLastSearch >= minUpdateInterval {
 				log.Println("Running scheduled PR update")
 				app.updatePRs(ctx)
 			} else {
 				remainingTime := minUpdateInterval - timeSinceLastSearch
-				log.Printf("Skipping scheduled update - recent search %v ago, %v remaining until next allowed", 
+				log.Printf("Skipping scheduled update - recent search %v ago, %v remaining until next allowed",
 					timeSinceLastSearch, remainingTime)
 			}
 		case <-ctx.Done():
@@ -480,28 +480,27 @@ func (app *App) updatePRs(ctx context.Context) {
 func (app *App) updateMenu(ctx context.Context) {
 	// Generate current menu titles
 	currentTitles := app.generateMenuTitles()
-	
+
 	// Compare with last titles to see if rebuild is needed
 	app.mu.RLock()
 	lastTitles := app.lastMenuTitles
 	app.mu.RUnlock()
-	
+
 	// Check if titles have changed
 	if slices.Equal(currentTitles, lastTitles) {
 		log.Printf("[MENU] No changes detected, skipping rebuild (%d items unchanged)", len(currentTitles))
 		return
 	}
-	
+
 	// Titles have changed, rebuild menu
 	log.Printf("[MENU] Changes detected, rebuilding menu (%d→%d items)", len(lastTitles), len(currentTitles))
 	app.rebuildMenu(ctx)
-	
+
 	// Store new titles
 	app.mu.Lock()
 	app.lastMenuTitles = currentTitles
 	app.mu.Unlock()
 }
-
 
 // updatePRsWithWait fetches PRs and waits for Turn data before building initial menu.
 func (app *App) updatePRsWithWait(ctx context.Context) {
@@ -539,8 +538,10 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 			app.rebuildMenu(ctx)
 			app.menuInitialized = true
 			// Store initial menu titles to prevent unnecessary rebuild on first update
+			// generateMenuTitles acquires its own read lock, so we can't hold a lock here
+			menuTitles := app.generateMenuTitles()
 			app.mu.Lock()
-			app.lastMenuTitles = app.generateMenuTitles()
+			app.lastMenuTitles = menuTitles
 			app.mu.Unlock()
 			// Menu initialization complete
 		}
@@ -585,8 +586,10 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.rebuildMenu(ctx)
 		app.menuInitialized = true
 		// Store initial menu titles to prevent unnecessary rebuild on first update
+		// generateMenuTitles acquires its own read lock, so we can't hold a lock here
+		menuTitles := app.generateMenuTitles()
 		app.mu.Lock()
-		app.lastMenuTitles = app.generateMenuTitles()
+		app.lastMenuTitles = menuTitles
 		app.mu.Unlock()
 		// Menu initialization complete
 	} else {
