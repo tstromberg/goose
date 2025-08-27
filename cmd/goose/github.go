@@ -138,16 +138,39 @@ func (*App) token(ctx context.Context) (string, error) {
 	}
 
 	log.Printf("Executing command: %s auth token", ghPath)
-	cmd := exec.CommandContext(ctx, ghPath, "auth", "token")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("gh command failed: %v", err)
-		return "", fmt.Errorf("exec 'gh auth token': %w", err)
+
+	// Use retry logic for gh CLI command as it may fail temporarily
+	var token string
+	retryErr := retry.Do(func() error {
+		// Create timeout context for gh CLI call
+		cmdCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(cmdCtx, ghPath, "auth", "token")
+		output, cmdErr := cmd.CombinedOutput()
+		if cmdErr != nil {
+			log.Printf("gh command failed (will retry): %v", cmdErr)
+			return fmt.Errorf("exec 'gh auth token': %w", cmdErr)
+		}
+
+		token = strings.TrimSpace(string(output))
+		if validateErr := validateGitHubToken(token); validateErr != nil {
+			// Don't retry on invalid token - it won't get better
+			return retry.Unrecoverable(fmt.Errorf("invalid token from gh CLI: %w", validateErr))
+		}
+		return nil
+	},
+		retry.Attempts(3), // Fewer attempts for local command
+		retry.Delay(time.Second),
+		retry.OnRetry(func(n uint, err error) {
+			log.Printf("[GH CLI] Retry %d/3: %v", n+1, err)
+		}),
+		retry.Context(ctx),
+	)
+	if retryErr != nil {
+		return "", retryErr
 	}
-	token := strings.TrimSpace(string(output))
-	if err := validateGitHubToken(token); err != nil {
-		return "", fmt.Errorf("invalid token from gh CLI: %w", err)
-	}
+
 	log.Println("Successfully obtained GitHub token from gh CLI")
 	return token, nil
 }
@@ -223,6 +246,11 @@ type prResult struct {
 
 // fetchPRsInternal fetches PRs and Turn data synchronously for simplicity.
 func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing []PR, _ error) {
+	// Update search attempt time for rate limiting
+	app.mu.Lock()
+	app.lastSearchAttempt = time.Now()
+	app.mu.Unlock()
+
 	// Check if we have a client
 	if app.client == nil {
 		return nil, nil, fmt.Errorf("no GitHub client available: %s", app.authError)

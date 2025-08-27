@@ -11,11 +11,15 @@ import (
 
 func TestMain(m *testing.M) {
 	// Set test mode to prevent actual sound playback during tests
-	_ = os.Setenv("GOOSE_TEST_MODE", "1")
+	if err := os.Setenv("GOOSE_TEST_MODE", "1"); err != nil {
+		panic(err)
+	}
 	os.Exit(m.Run())
 }
 
 func TestIsStale(t *testing.T) {
+	// Capture time.Now() once to avoid race conditions
+	now := time.Now()
 	tests := []struct {
 		time     time.Time
 		name     string
@@ -23,17 +27,17 @@ func TestIsStale(t *testing.T) {
 	}{
 		{
 			name:     "recent PR",
-			time:     time.Now().Add(-24 * time.Hour),
+			time:     now.Add(-24 * time.Hour),
 			expected: false,
 		},
 		{
 			name:     "stale PR",
-			time:     time.Now().Add(-91 * 24 * time.Hour),
+			time:     now.Add(-91 * 24 * time.Hour),
 			expected: true,
 		},
 		{
 			name:     "exactly at threshold",
-			time:     time.Now().Add(-90 * 24 * time.Hour),
+			time:     now.Add(-90 * 24 * time.Hour),
 			expected: true, // >= 90 days is stale
 		},
 	}
@@ -41,7 +45,11 @@ func TestIsStale(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// isStale was inlined - test the logic directly
-			if got := tt.time.Before(time.Now().Add(-stalePRThreshold)); got != tt.expected {
+			// Use the same 'now' for consistency
+			threshold := now.Add(-stalePRThreshold)
+			got := !tt.time.After(threshold) // time <= threshold means stale (>= 90 days old)
+			if got != tt.expected {
+				t.Logf("Test time: %v, Threshold: %v, Before: %v", tt.time, threshold, got)
 				t.Errorf("stale check = %v, want %v", got, tt.expected)
 			}
 		})
@@ -63,6 +71,7 @@ func TestMenuItemTitleTransition(t *testing.T) {
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
 		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	// Test incoming PR that just became blocked
@@ -174,6 +183,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	tests := []struct {
@@ -299,6 +309,7 @@ func TestSoundPlaybackDuringTransitions(t *testing.T) {
 		enableAudioCues:     true,
 		initialLoadComplete: true, // Set to true to allow sound playback
 		menuInitialized:     true,
+		systrayInterface:    &MockSystray{}, // Use mock systray to avoid Windows-specific panics
 	}
 
 	tests := []struct {
@@ -443,6 +454,7 @@ func TestSoundDisabledNoPlayback(t *testing.T) {
 		enableAudioCues:     false, // Audio disabled
 		initialLoadComplete: true,
 		menuInitialized:     true,
+		systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	// Note: We verify behavior through state changes rather than direct sound capture
@@ -482,7 +494,8 @@ func TestGracePeriodPreventsNotifications(t *testing.T) {
 		enableAudioCues:     true,
 		initialLoadComplete: true,
 		menuInitialized:     true,
-		startTime:           time.Now(), // Just started
+		startTime:           time.Now(),     // Just started
+		systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	// Track whether we're in grace period for verification
@@ -607,6 +620,7 @@ func TestNotificationScenarios(t *testing.T) {
 				initialLoadComplete: tt.initialLoadComplete,
 				menuInitialized:     true,
 				startTime:           time.Now().Add(-tt.timeSinceStart),
+				systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 			}
 
 			// Set up previous state
@@ -636,7 +650,7 @@ func TestNotificationScenarios(t *testing.T) {
 					t.Errorf("%s: Expected PR to be tracked as blocked", tt.description)
 				}
 				// Should have set FirstBlockedAt in state manager
-				if state, exists := app.stateManager.GetPRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
+				if state, exists := app.stateManager.PRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
 					t.Errorf("%s: Expected FirstBlockedAt to be set in state manager", tt.description)
 				}
 			}
@@ -666,6 +680,7 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 		initialLoadComplete: true, // Already past initial load
 		menuInitialized:     true,
 		startTime:           time.Now().Add(-35 * time.Second), // Started 35 seconds ago
+		systrayInterface:    &MockSystray{},                    // Use mock systray to avoid panics
 	}
 
 	// Start with no blocked PRs
@@ -690,7 +705,7 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 	}
 
 	// Verify FirstBlockedAt was set in state manager
-	if state, exists := app.stateManager.GetPRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
+	if state, exists := app.stateManager.PRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
 		t.Error("Expected FirstBlockedAt to be set for newly blocked PR in state manager")
 	}
 }

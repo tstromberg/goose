@@ -9,20 +9,18 @@ import (
 
 // PRState tracks the complete state of a PR including blocking history.
 type PRState struct {
-	PR              PR
 	FirstBlockedAt  time.Time
 	LastSeenBlocked time.Time
-	HasNotified     bool // Have we already notified about this PR being blocked?
+	PR              PR
+	HasNotified     bool
 }
 
 // PRStateManager manages all PR states with proper synchronization.
 type PRStateManager struct {
-	mu     sync.RWMutex
-	states map[string]*PRState // Key is PR URL
-
-	// Configuration
 	startTime          time.Time
+	states             map[string]*PRState
 	gracePeriodSeconds int
+	mu                 sync.RWMutex
 }
 
 // NewPRStateManager creates a new PR state manager.
@@ -120,8 +118,8 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 	return toNotify
 }
 
-// GetBlockedPRs returns all currently blocked PRs with their states.
-func (m *PRStateManager) GetBlockedPRs() map[string]*PRState {
+// BlockedPRs returns all currently blocked PRs with their states.
+func (m *PRStateManager) BlockedPRs() map[string]*PRState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -132,8 +130,8 @@ func (m *PRStateManager) GetBlockedPRs() map[string]*PRState {
 	return result
 }
 
-// GetPRState returns the state for a specific PR.
-func (m *PRStateManager) GetPRState(url string) (*PRState, bool) {
+// PRState returns the state for a specific PR.
+func (m *PRStateManager) PRState(url string) (*PRState, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

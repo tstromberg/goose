@@ -12,8 +12,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/energye/systray"
+	"github.com/energye/systray" // needed for MenuItem type
 )
+
+// Ensure systray package is used.
+var _ *systray.MenuItem = nil
 
 // openURL safely opens a URL in the default browser after validation.
 func openURL(ctx context.Context, rawURL string) error {
@@ -157,7 +160,7 @@ func (app *App) setTrayTitle() {
 	// Log title change with detailed counts
 	log.Printf("[TRAY] Setting title to '%s' (incoming_total=%d, incoming_blocked=%d, outgoing_total=%d, outgoing_blocked=%d)",
 		title, counts.IncomingTotal, counts.IncomingBlocked, counts.OutgoingTotal, counts.OutgoingBlocked)
-	systray.SetTitle(title)
+	app.systrayInterface.SetTitle(title)
 }
 
 // addPRSection adds a section of PRs to the menu.
@@ -169,7 +172,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	// Add header
 	headerText := fmt.Sprintf("%s — %d blocked on you", sectionTitle, blockedCount)
 	// Create section header
-	header := systray.AddMenuItem(headerText, "")
+	header := app.systrayInterface.AddMenuItem(headerText, "")
 	header.Disable()
 
 	// Sort PRs with blocked ones first - inline for simplicity
@@ -214,7 +217,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		// Add bullet point or emoji for blocked PRs
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			// Get the blocked time from state manager
-			prState, hasState := app.stateManager.GetPRState(sortedPRs[prIndex].URL)
+			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
 			// Show emoji for PRs blocked within the last 5 minutes
 			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
@@ -266,7 +269,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		}
 
 		// Create PR menu item
-		item := systray.AddMenuItem(title, tooltip)
+		item := app.systrayInterface.AddMenuItem(title, tooltip)
 
 		// Capture URL to avoid loop variable capture bug
 		prURL := sortedPRs[prIndex].URL
@@ -278,50 +281,157 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	}
 }
 
+// generateMenuTitles generates the list of menu item titles that would be shown
+// without actually building the UI. Used for change detection.
+func (app *App) generateMenuTitles() []string {
+	var titles []string
+
+	// Check for auth error first
+	if app.authError != "" {
+		titles = append(titles,
+			"⚠️ Authentication Error",
+			app.authError,
+			"To fix this issue:",
+			"1. Install GitHub CLI: brew install gh",
+			"2. Run: gh auth login",
+			"3. Or set GITHUB_TOKEN environment variable",
+			"Quit")
+		return titles
+	}
+
+	app.mu.RLock()
+	incoming := make([]PR, len(app.incoming))
+	copy(incoming, app.incoming)
+	outgoing := make([]PR, len(app.outgoing))
+	copy(outgoing, app.outgoing)
+	hiddenOrgs := make(map[string]bool)
+	for org, hidden := range app.hiddenOrgs {
+		hiddenOrgs[org] = hidden
+	}
+	hideStale := app.hideStaleIncoming
+	app.mu.RUnlock()
+
+	// Add common menu items
+	titles = append(titles, "Web Dashboard")
+
+	// Generate PR section titles
+	if len(incoming) == 0 && len(outgoing) == 0 {
+		titles = append(titles, "No pull requests")
+	} else {
+		// Add incoming PR titles
+		if len(incoming) > 0 {
+			titles = append(titles, "📥 Incoming PRs")
+			titles = append(titles, app.generatePRSectionTitles(incoming, "Incoming", hiddenOrgs, hideStale)...)
+		}
+
+		// Add outgoing PR titles
+		if len(outgoing) > 0 {
+			titles = append(titles, "📤 Outgoing PRs")
+			titles = append(titles, app.generatePRSectionTitles(outgoing, "Outgoing", hiddenOrgs, hideStale)...)
+		}
+	}
+
+	// Add settings menu items
+	titles = append(titles,
+		"⚙️ Settings",
+		"Hide Stale Incoming PRs",
+		"Honks enabled",
+		"Auto-open in Browser",
+		"Hidden Organizations",
+		"Quit")
+
+	return titles
+}
+
+// generatePRSectionTitles generates the titles for a specific PR section.
+func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrgs map[string]bool, hideStale bool) []string {
+	var titles []string
+
+	// Sort PRs by UpdatedAt (most recent first)
+	sortedPRs := make([]PR, len(prs))
+	copy(sortedPRs, prs)
+	sort.Slice(sortedPRs, func(i, j int) bool {
+		return sortedPRs[i].UpdatedAt.After(sortedPRs[j].UpdatedAt)
+	})
+
+	for prIndex := range sortedPRs {
+		// Apply filters (same logic as in addPRSection)
+		org := extractOrgFromRepo(sortedPRs[prIndex].Repository)
+		if org != "" && hiddenOrgs[org] {
+			continue
+		}
+
+		if hideStale && sortedPRs[prIndex].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
+			continue
+		}
+
+		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
+
+		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
+		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
+			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
+
+			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
+				if sectionTitle == "Outgoing" {
+					title = fmt.Sprintf("🎉 %s", title)
+				} else {
+					title = fmt.Sprintf("🪿 %s", title)
+				}
+			} else {
+				title = fmt.Sprintf("• %s", title)
+			}
+		}
+
+		titles = append(titles, title)
+	}
+
+	return titles
+}
+
 // rebuildMenu completely rebuilds the menu from scratch.
 func (app *App) rebuildMenu(ctx context.Context) {
 	// Rebuild entire menu
 
 	// Clear all existing menu items
-	systray.ResetMenu()
+	app.systrayInterface.ResetMenu()
 
 	// Check for auth error first
 	if app.authError != "" {
 		// Show authentication error message
-		errorTitle := systray.AddMenuItem("⚠️ Authentication Error", "")
+		errorTitle := app.systrayInterface.AddMenuItem("⚠️ Authentication Error", "")
 		errorTitle.Disable()
 
-		systray.AddSeparator()
+		app.systrayInterface.AddSeparator()
 
 		// Add error details
-		errorMsg := systray.AddMenuItem(app.authError, "Click to see setup instructions")
+		errorMsg := app.systrayInterface.AddMenuItem(app.authError, "Click to see setup instructions")
 		errorMsg.Click(func() {
 			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login"); err != nil {
 				log.Printf("failed to open setup instructions: %v", err)
 			}
 		})
 
-		systray.AddSeparator()
+		app.systrayInterface.AddSeparator()
 
 		// Add setup instructions
-		setupInstr := systray.AddMenuItem("To fix this issue:", "")
+		setupInstr := app.systrayInterface.AddMenuItem("To fix this issue:", "")
 		setupInstr.Disable()
 
-		option1 := systray.AddMenuItem("1. Install GitHub CLI: brew install gh", "")
+		option1 := app.systrayInterface.AddMenuItem("1. Install GitHub CLI: brew install gh", "")
 		option1.Disable()
 
-		option2 := systray.AddMenuItem("2. Run: gh auth login", "")
+		option2 := app.systrayInterface.AddMenuItem("2. Run: gh auth login", "")
 		option2.Disable()
 
-		option3 := systray.AddMenuItem("3. Or set GITHUB_TOKEN environment variable", "")
+		option3 := app.systrayInterface.AddMenuItem("3. Or set GITHUB_TOKEN environment variable", "")
 		option3.Disable()
 
-		systray.AddSeparator()
+		app.systrayInterface.AddSeparator()
 
 		// Add quit option
-		quitItem := systray.AddMenuItem("Quit", "")
+		quitItem := app.systrayInterface.AddMenuItem("Quit", "")
 		quitItem.Click(func() {
-			systray.Quit()
+			app.systrayInterface.Quit()
 		})
 
 		return
@@ -332,14 +442,14 @@ func (app *App) rebuildMenu(ctx context.Context) {
 
 	// Dashboard at the top
 	// Add Web Dashboard link
-	dashboardItem := systray.AddMenuItem("Web Dashboard", "")
+	dashboardItem := app.systrayInterface.AddMenuItem("Web Dashboard", "")
 	dashboardItem.Click(func() {
 		if err := openURL(ctx, "https://dash.ready-to-review.dev/"); err != nil {
 			log.Printf("failed to open dashboard: %v", err)
 		}
 	})
 
-	systray.AddSeparator()
+	app.systrayInterface.AddSeparator()
 
 	// Get PR counts
 	counts := app.countPRs()
@@ -347,7 +457,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Handle "No pull requests" case
 	if counts.IncomingTotal == 0 && counts.OutgoingTotal == 0 {
 		// No PRs to display
-		noPRs := systray.AddMenuItem("No pull requests", "")
+		noPRs := app.systrayInterface.AddMenuItem("No pull requests", "")
 		noPRs.Disable()
 	} else {
 		// Incoming section
@@ -358,7 +468,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 			app.addPRSection(ctx, incoming, "Incoming", counts.IncomingBlocked)
 		}
 
-		systray.AddSeparator()
+		app.systrayInterface.AddSeparator()
 
 		// Outgoing section
 		if counts.OutgoingTotal > 0 {
@@ -379,11 +489,11 @@ func (app *App) rebuildMenu(ctx context.Context) {
 func (app *App) addStaticMenuItems(ctx context.Context) {
 	// Add static menu items
 
-	systray.AddSeparator()
+	app.systrayInterface.AddSeparator()
 
 	// Hide orgs submenu
 	// Add 'Hide orgs' submenu
-	hideOrgsMenu := systray.AddMenuItem("Hide orgs", "Select organizations to hide PRs from")
+	hideOrgsMenu := app.systrayInterface.AddMenuItem("Hide orgs", "Select organizations to hide PRs from")
 
 	// Get combined list of seen orgs and hidden orgs
 	app.mu.RLock()
@@ -448,7 +558,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 
 	// Hide stale PRs
 	// Add 'Hide stale PRs' option
-	hideStaleItem := systray.AddMenuItem("Hide stale PRs (>90 days)", "")
+	hideStaleItem := app.systrayInterface.AddMenuItem("Hide stale PRs (>90 days)", "")
 	if app.hideStaleIncoming {
 		hideStaleItem.Check()
 	}
@@ -478,7 +588,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 
 	// Audio cues
 	// Add 'Audio cues' option
-	audioItem := systray.AddMenuItem("Audio cues", "Play sounds for notifications")
+	audioItem := app.systrayInterface.AddMenuItem("Honks enabled", "Play sounds for notifications")
 	app.mu.RLock()
 	if app.enableAudioCues {
 		audioItem.Check()
@@ -504,7 +614,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 
 	// Auto-open blocked PRs in browser
 	// Add 'Auto-open PRs' option
-	autoOpenItem := systray.AddMenuItem("Auto-open incoming PRs", "Automatically open newly blocked PRs in browser (rate limited)")
+	autoOpenItem := app.systrayInterface.AddMenuItem("Auto-open incoming PRs", "Automatically open newly blocked PRs in browser (rate limited)")
 	app.mu.RLock()
 	if app.enableAutoBrowser {
 		autoOpenItem.Check()
@@ -534,9 +644,9 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 
 	// Quit
 	// Add 'Quit' option
-	quitItem := systray.AddMenuItem("Quit", "")
+	quitItem := app.systrayInterface.AddMenuItem("Quit", "")
 	quitItem.Click(func() {
 		log.Println("Quit requested by user")
-		systray.Quit()
+		app.systrayInterface.Quit()
 	})
 }
