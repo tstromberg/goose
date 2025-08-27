@@ -42,7 +42,7 @@ func TestConcurrentMenuOperations(t *testing.T) {
 	}()
 
 	// Simulate concurrent menu clicks (write lock operations)
-	for i := 0; i < concurrentOps; i++ {
+	for range concurrentOps {
 		go func() {
 			defer wg.Done()
 
@@ -55,7 +55,7 @@ func TestConcurrentMenuOperations(t *testing.T) {
 	}
 
 	// Simulate concurrent menu generation (read lock operations)
-	for i := 0; i < concurrentOps; i++ {
+	for range concurrentOps {
 		go func() {
 			defer wg.Done()
 
@@ -65,7 +65,7 @@ func TestConcurrentMenuOperations(t *testing.T) {
 	}
 
 	// Simulate concurrent PR updates (write lock operations)
-	for i := 0; i < concurrentOps; i++ {
+	for i := range concurrentOps {
 		go func(iteration int) {
 			defer wg.Done()
 
@@ -154,7 +154,7 @@ func TestRapidMenuClicks(t *testing.T) {
 	clickCount := 20
 	successfulClicks := 0
 
-	for i := 0; i < clickCount; i++ {
+	for range clickCount {
 		// Check if enough time has passed for rate limiting
 		app.mu.RLock()
 		timeSince := time.Since(app.lastSearchAttempt)

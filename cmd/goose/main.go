@@ -64,37 +64,34 @@ type PR struct {
 
 // App holds the application state.
 type App struct {
+	lastSearchAttempt   time.Time
 	lastSuccessfulFetch time.Time
-	lastSearchAttempt   time.Time // For rate limiting forced refreshes
-	lastMenuTitles      []string  // For change detection to prevent unnecessary redraws
 	startTime           time.Time
-	client              *github.Client
-	turnClient          *turn.Client
-	currentUser         *github.User
-	stateManager        *PRStateManager // NEW: Centralized state management
+	systrayInterface    SystrayInterface
 	browserRateLimiter  *BrowserRateLimiter
-	targetUser          string
-	cacheDir            string
+	blockedPRTimes      map[string]time.Time
+	currentUser         *github.User
+	stateManager        *PRStateManager
+	client              *github.Client
+	hiddenOrgs          map[string]bool
+	seenOrgs            map[string]bool
+	turnClient          *turn.Client
+	previousBlockedPRs  map[string]bool
 	authError           string
-	incoming            []PR
+	cacheDir            string
+	targetUser          string
+	lastMenuTitles      []string
 	outgoing            []PR
+	incoming            []PR
 	updateInterval      time.Duration
 	consecutiveFailures int
 	mu                  sync.RWMutex
-	menuInitialized     bool
-	initialLoadComplete bool
-	enableAudioCues     bool
 	enableAutoBrowser   bool
 	hideStaleIncoming   bool
 	noCache             bool
-	systrayInterface    SystrayInterface // For mocking systray operations in tests
-	hiddenOrgs          map[string]bool
-	seenOrgs            map[string]bool
-
-	// Deprecated: These fields are kept for backward compatibility with tests
-	// The actual state is managed by stateManager
-	previousBlockedPRs map[string]bool      // Deprecated: use stateManager
-	blockedPRTimes     map[string]time.Time // Deprecated: use stateManager
+	enableAudioCues     bool
+	initialLoadComplete bool
+	menuInitialized     bool
 }
 
 func loadCurrentUser(ctx context.Context, app *App) {

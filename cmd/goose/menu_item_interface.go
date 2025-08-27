@@ -66,12 +66,12 @@ func (r *RealMenuItem) AddSubMenuItem(title, tooltip string) MenuItem {
 
 // MockMenuItem implements MenuItem for testing without calling systray functions.
 type MockMenuItem struct {
+	clickHandler func()
 	title        string
 	tooltip      string
+	subItems     []MenuItem
 	disabled     bool
 	checked      bool
-	clickHandler func()
-	subItems     []MenuItem
 }
 
 // Ensure MockMenuItem implements MenuItem interface.

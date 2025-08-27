@@ -10,10 +10,10 @@ import (
 
 // Settings represents persistent user settings.
 type Settings struct {
+	HiddenOrgs        map[string]bool `json:"hidden_orgs"`
 	EnableAudioCues   bool            `json:"enable_audio_cues"`
 	HideStale         bool            `json:"hide_stale"`
 	EnableAutoBrowser bool            `json:"enable_auto_browser"`
-	HiddenOrgs        map[string]bool `json:"hidden_orgs"`
 }
 
 // settingsDir returns the configuration directory for settings.

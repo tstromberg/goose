@@ -9,20 +9,18 @@ import (
 
 // PRState tracks the complete state of a PR including blocking history.
 type PRState struct {
-	PR              PR
 	FirstBlockedAt  time.Time
 	LastSeenBlocked time.Time
-	HasNotified     bool // Have we already notified about this PR being blocked?
+	PR              PR
+	HasNotified     bool
 }
 
 // PRStateManager manages all PR states with proper synchronization.
 type PRStateManager struct {
-	mu     sync.RWMutex
-	states map[string]*PRState // Key is PR URL
-
-	// Configuration
 	startTime          time.Time
+	states             map[string]*PRState
 	gracePeriodSeconds int
+	mu                 sync.RWMutex
 }
 
 // NewPRStateManager creates a new PR state manager.
