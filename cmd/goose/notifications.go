@@ -33,7 +33,7 @@ func (app *App) processNotifications(ctx context.Context) {
 	app.mu.Lock()
 	app.previousBlockedPRs = make(map[string]bool)
 	app.blockedPRTimes = make(map[string]time.Time)
-	states := app.stateManager.GetBlockedPRs()
+	states := app.stateManager.BlockedPRs()
 	for url, state := range states {
 		app.previousBlockedPRs[url] = true
 		app.blockedPRTimes[url] = state.FirstBlockedAt

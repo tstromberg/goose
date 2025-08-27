@@ -1,15 +1,13 @@
 package main
 
 import (
-	"reflect"
-
 	"github.com/energye/systray"
 )
 
 // SystrayInterface abstracts systray operations for testing.
 type SystrayInterface interface {
 	ResetMenu()
-	AddMenuItem(title, tooltip string) *systray.MenuItem
+	AddMenuItem(title, tooltip string) MenuItem
 	AddSeparator()
 	SetTitle(title string)
 	SetOnClick(fn func(menu systray.IMenu))
@@ -23,8 +21,9 @@ func (*RealSystray) ResetMenu() {
 	systray.ResetMenu()
 }
 
-func (*RealSystray) AddMenuItem(title, tooltip string) *systray.MenuItem {
-	return systray.AddMenuItem(title, tooltip)
+func (*RealSystray) AddMenuItem(title, tooltip string) MenuItem {
+	item := systray.AddMenuItem(title, tooltip)
+	return &RealMenuItem{MenuItem: item}
 }
 
 func (*RealSystray) AddSeparator() {
@@ -53,24 +52,13 @@ func (m *MockSystray) ResetMenu() {
 	m.menuItems = nil
 }
 
-func (m *MockSystray) AddMenuItem(title, _ string) *systray.MenuItem {
+func (m *MockSystray) AddMenuItem(title, tooltip string) MenuItem {
 	m.menuItems = append(m.menuItems, title)
-	// Create a MenuItem with initialized internal maps using reflection
-	// This prevents nil map panics when methods are called
-	item := &systray.MenuItem{}
-
-	// Use reflection to initialize internal maps if they exist
-	// This is a hack but necessary for testing
-	rv := reflect.ValueOf(item).Elem()
-	rt := rv.Type()
-	for i := 0; i < rt.NumField(); i++ {
-		field := rv.Field(i)
-		if field.Kind() == reflect.Map && field.IsNil() && field.CanSet() {
-			field.Set(reflect.MakeMap(field.Type()))
-		}
+	// Return a MockMenuItem that won't panic when methods are called
+	return &MockMenuItem{
+		title:   title,
+		tooltip: tooltip,
 	}
-
-	return item
 }
 
 func (m *MockSystray) AddSeparator() {

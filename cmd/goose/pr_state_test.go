@@ -36,7 +36,7 @@ func TestPRStateManager(t *testing.T) {
 	}
 
 	// Verify state was removed
-	if _, exists := mgr.GetPRState(pr1.URL); exists {
+	if _, exists := mgr.PRState(pr1.URL); exists {
 		t.Error("Expected PR state to be removed when unblocked")
 	}
 
@@ -66,7 +66,7 @@ func TestPRStateManagerGracePeriod(t *testing.T) {
 	}
 
 	// Verify state is still tracked
-	if _, exists := mgr.GetPRState(pr1.URL); !exists {
+	if _, exists := mgr.PRState(pr1.URL); !exists {
 		t.Error("Expected PR state to be tracked even during grace period")
 	}
 

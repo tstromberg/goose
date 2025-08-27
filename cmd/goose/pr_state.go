@@ -120,8 +120,8 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 	return toNotify
 }
 
-// GetBlockedPRs returns all currently blocked PRs with their states.
-func (m *PRStateManager) GetBlockedPRs() map[string]*PRState {
+// BlockedPRs returns all currently blocked PRs with their states.
+func (m *PRStateManager) BlockedPRs() map[string]*PRState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -132,8 +132,8 @@ func (m *PRStateManager) GetBlockedPRs() map[string]*PRState {
 	return result
 }
 
-// GetPRState returns the state for a specific PR.
-func (m *PRStateManager) GetPRState(url string) (*PRState, bool) {
+// PRState returns the state for a specific PR.
+func (m *PRStateManager) PRState(url string) (*PRState, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 

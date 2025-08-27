@@ -644,7 +644,7 @@ func TestNotificationScenarios(t *testing.T) {
 					t.Errorf("%s: Expected PR to be tracked as blocked", tt.description)
 				}
 				// Should have set FirstBlockedAt in state manager
-				if state, exists := app.stateManager.GetPRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
+				if state, exists := app.stateManager.PRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
 					t.Errorf("%s: Expected FirstBlockedAt to be set in state manager", tt.description)
 				}
 			}
@@ -699,7 +699,7 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 	}
 
 	// Verify FirstBlockedAt was set in state manager
-	if state, exists := app.stateManager.GetPRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
+	if state, exists := app.stateManager.PRState("https://github.com/test/repo/pull/1"); !exists || state.FirstBlockedAt.IsZero() {
 		t.Error("Expected FirstBlockedAt to be set for newly blocked PR in state manager")
 	}
 }

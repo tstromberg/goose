@@ -217,7 +217,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		// Add bullet point or emoji for blocked PRs
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			// Get the blocked time from state manager
-			prState, hasState := app.stateManager.GetPRState(sortedPRs[prIndex].URL)
+			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
 			// Show emoji for PRs blocked within the last 5 minutes
 			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
@@ -369,7 +369,7 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 
 		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
-			prState, hasState := app.stateManager.GetPRState(sortedPRs[prIndex].URL)
+			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
 			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
 				if sectionTitle == "Outgoing" {
