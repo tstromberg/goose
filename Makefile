@@ -10,7 +10,10 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
 
-.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows
+.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows test
+
+test:
+	go test -race ./...
 
 # Default target
 all: build

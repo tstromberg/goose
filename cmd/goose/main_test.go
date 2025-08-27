@@ -47,7 +47,7 @@ func TestIsStale(t *testing.T) {
 			// isStale was inlined - test the logic directly
 			// Use the same 'now' for consistency
 			threshold := now.Add(-stalePRThreshold)
-			got := tt.time.Before(threshold)
+			got := !tt.time.After(threshold) // time <= threshold means stale (>= 90 days old)
 			if got != tt.expected {
 				t.Logf("Test time: %v, Threshold: %v, Before: %v", tt.time, threshold, got)
 				t.Errorf("stale check = %v, want %v", got, tt.expected)
