@@ -15,12 +15,12 @@ Lives in your menubar like a tiny waterfowl of productivity shame, watching your
 
 ## What It Does
 
-- **🪿 Honks** when you're blocking someone's PR (authentic goose noises included)
-- **✈️ Jet sounds** when your own PR is ready for the next stage
-- **🧠 Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
-- **⭐ Auto-start** on login (macOS)
-- **🔔 Auto-open** incoming PRs in your browser (off by default, rate-limited)
-- **🎯 Org Filtering** for orgs you may not care about in a home or work context
+- **Honks** when you're blocking someone's PR (authentic goose noises included)
+- **Jet sounds** when your own PR is ready for the next stage
+- **Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
+- **Auto-start** on login (macOS)
+- **Auto-open** incoming PRs in your browser (off by default, rate-limited)
+- **Org Filtering** for orgs you may not care about in a home or work context
 
 You can also visit the web-based dashboard at https://dash.ready-to-review.dev/
 
