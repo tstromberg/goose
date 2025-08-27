@@ -18,6 +18,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestIsStale(t *testing.T) {
+	// Capture time.Now() once to avoid race conditions
+	now := time.Now()
 	tests := []struct {
 		time     time.Time
 		name     string
@@ -25,17 +27,17 @@ func TestIsStale(t *testing.T) {
 	}{
 		{
 			name:     "recent PR",
-			time:     time.Now().Add(-24 * time.Hour),
+			time:     now.Add(-24 * time.Hour),
 			expected: false,
 		},
 		{
 			name:     "stale PR",
-			time:     time.Now().Add(-91 * 24 * time.Hour),
+			time:     now.Add(-91 * 24 * time.Hour),
 			expected: true,
 		},
 		{
 			name:     "exactly at threshold",
-			time:     time.Now().Add(-90 * 24 * time.Hour),
+			time:     now.Add(-90 * 24 * time.Hour),
 			expected: true, // >= 90 days is stale
 		},
 	}
@@ -43,7 +45,11 @@ func TestIsStale(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// isStale was inlined - test the logic directly
-			if got := tt.time.Before(time.Now().Add(-stalePRThreshold)); got != tt.expected {
+			// Use the same 'now' for consistency
+			threshold := now.Add(-stalePRThreshold)
+			got := tt.time.Before(threshold)
+			if got != tt.expected {
+				t.Logf("Test time: %v, Threshold: %v, Before: %v", tt.time, threshold, got)
 				t.Errorf("stale check = %v, want %v", got, tt.expected)
 			}
 		})
