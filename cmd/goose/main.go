@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -64,6 +65,8 @@ type PR struct {
 // App holds the application state.
 type App struct {
 	lastSuccessfulFetch time.Time
+	lastSearchAttempt   time.Time // For rate limiting forced refreshes
+	lastMenuTitles      []string  // For change detection to prevent unnecessary redraws
 	startTime           time.Time
 	client              *github.Client
 	turnClient          *turn.Client
@@ -251,6 +254,22 @@ func (app *App) onReady(ctx context.Context) {
 	// Set up click handlers first (needed for both success and error states)
 	systray.SetOnClick(func(menu systray.IMenu) {
 		log.Println("Icon clicked")
+		
+		// Check if we can perform a forced refresh (rate limited to every 10 seconds)
+		app.mu.RLock()
+		timeSinceLastSearch := time.Since(app.lastSearchAttempt)
+		app.mu.RUnlock()
+		
+		if timeSinceLastSearch >= minUpdateInterval {
+			log.Printf("[CLICK] Forcing search refresh (last search %v ago)", timeSinceLastSearch)
+			go func() {
+				app.updatePRs(ctx)
+			}()
+		} else {
+			remainingTime := minUpdateInterval - timeSinceLastSearch
+			log.Printf("[CLICK] Rate limited - search performed %v ago, %v remaining", timeSinceLastSearch, remainingTime)
+		}
+		
 		if menu != nil {
 			if err := menu.ShowMenu(); err != nil {
 				log.Printf("Failed to show menu: %v", err)
@@ -325,8 +344,19 @@ func (app *App) updateLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			log.Println("Running scheduled PR update")
-			app.updatePRs(ctx)
+			// Check if we should skip this scheduled update due to recent forced refresh
+			app.mu.RLock()
+			timeSinceLastSearch := time.Since(app.lastSearchAttempt)
+			app.mu.RUnlock()
+			
+			if timeSinceLastSearch >= minUpdateInterval {
+				log.Println("Running scheduled PR update")
+				app.updatePRs(ctx)
+			} else {
+				remainingTime := minUpdateInterval - timeSinceLastSearch
+				log.Printf("Skipping scheduled update - recent search %v ago, %v remaining until next allowed", 
+					timeSinceLastSearch, remainingTime)
+			}
 		case <-ctx.Done():
 			log.Println("Update loop stopping due to context cancellation")
 			return
@@ -444,12 +474,32 @@ func (app *App) updatePRs(ctx context.Context) {
 	log.Print("[DEBUG] Completed PR state updates and notifications")
 }
 
-// updateMenu rebuilds the menu every time - simple and reliable.
+// updateMenu rebuilds the menu only if there are changes to improve UX.
 func (app *App) updateMenu(ctx context.Context) {
-	// Always rebuild - it's just a small menu, performance is not an issue
-	log.Println("[MENU] Rebuilding menu")
+	// Generate current menu titles
+	currentTitles := app.generateMenuTitles()
+	
+	// Compare with last titles to see if rebuild is needed
+	app.mu.RLock()
+	lastTitles := app.lastMenuTitles
+	app.mu.RUnlock()
+	
+	// Check if titles have changed
+	if slices.Equal(currentTitles, lastTitles) {
+		log.Printf("[MENU] No changes detected, skipping rebuild (%d items unchanged)", len(currentTitles))
+		return
+	}
+	
+	// Titles have changed, rebuild menu
+	log.Printf("[MENU] Changes detected, rebuilding menu (%d→%d items)", len(lastTitles), len(currentTitles))
 	app.rebuildMenu(ctx)
+	
+	// Store new titles
+	app.mu.Lock()
+	app.lastMenuTitles = currentTitles
+	app.mu.Unlock()
 }
+
 
 // updatePRsWithWait fetches PRs and waits for Turn data before building initial menu.
 func (app *App) updatePRsWithWait(ctx context.Context) {

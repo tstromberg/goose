@@ -223,6 +223,11 @@ type prResult struct {
 
 // fetchPRsInternal fetches PRs and Turn data synchronously for simplicity.
 func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing []PR, _ error) {
+	// Update search attempt time for rate limiting
+	app.mu.Lock()
+	app.lastSearchAttempt = time.Now()
+	app.mu.Unlock()
+	
 	// Check if we have a client
 	if app.client == nil {
 		return nil, nil, fmt.Errorf("no GitHub client available: %s", app.authError)

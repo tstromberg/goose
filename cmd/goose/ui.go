@@ -278,6 +278,111 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	}
 }
 
+// generateMenuTitles generates the list of menu item titles that would be shown
+// without actually building the UI. Used for change detection.
+func (app *App) generateMenuTitles() []string {
+	var titles []string
+	
+	// Check for auth error first
+	if app.authError != "" {
+		titles = append(titles, "⚠️ Authentication Error")
+		titles = append(titles, app.authError)
+		titles = append(titles, "To fix this issue:")
+		titles = append(titles, "1. Install GitHub CLI: brew install gh")
+		titles = append(titles, "2. Run: gh auth login")
+		titles = append(titles, "3. Or set GITHUB_TOKEN environment variable")
+		titles = append(titles, "Quit")
+		return titles
+	}
+
+	app.mu.RLock()
+	incoming := make([]PR, len(app.incoming))
+	copy(incoming, app.incoming)
+	outgoing := make([]PR, len(app.outgoing))
+	copy(outgoing, app.outgoing)
+	hiddenOrgs := make(map[string]bool)
+	for org, hidden := range app.hiddenOrgs {
+		hiddenOrgs[org] = hidden
+	}
+	hideStale := app.hideStaleIncoming
+	app.mu.RUnlock()
+
+	// Add common menu items
+	titles = append(titles, "Web Dashboard")
+
+	// Generate PR section titles
+	if len(incoming) == 0 && len(outgoing) == 0 {
+		titles = append(titles, "No pull requests")
+	} else {
+		// Add incoming PR titles
+		if len(incoming) > 0 {
+			titles = append(titles, "📥 Incoming PRs")
+			titles = append(titles, app.generatePRSectionTitles(incoming, "Incoming", hiddenOrgs, hideStale)...)
+		}
+		
+		// Add outgoing PR titles  
+		if len(outgoing) > 0 {
+			titles = append(titles, "📤 Outgoing PRs")
+			titles = append(titles, app.generatePRSectionTitles(outgoing, "Outgoing", hiddenOrgs, hideStale)...)
+		}
+	}
+
+	// Add settings menu items
+	titles = append(titles, "⚙️ Settings")
+	titles = append(titles, "Hide Stale Incoming PRs")
+	titles = append(titles, "Honks enabled")
+	titles = append(titles, "Auto-open in Browser")
+	titles = append(titles, "Hidden Organizations")
+	titles = append(titles, "Quit")
+	
+	return titles
+}
+
+// generatePRSectionTitles generates the titles for a specific PR section
+func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrgs map[string]bool, hideStale bool) []string {
+	var titles []string
+	
+	// Sort PRs by UpdatedAt (most recent first)
+	sortedPRs := make([]PR, len(prs))
+	copy(sortedPRs, prs)
+	sort.Slice(sortedPRs, func(i, j int) bool {
+		return sortedPRs[i].UpdatedAt.After(sortedPRs[j].UpdatedAt)
+	})
+	
+	for prIndex := range sortedPRs {
+		// Apply filters (same logic as in addPRSection)
+		org := extractOrgFromRepo(sortedPRs[prIndex].Repository)
+		if org != "" && hiddenOrgs[org] {
+			continue
+		}
+		
+		if hideStale && sortedPRs[prIndex].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
+			continue
+		}
+
+		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
+		
+		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
+		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
+			prState, hasState := app.stateManager.GetPRState(sortedPRs[prIndex].URL)
+			
+			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
+				if sectionTitle == "Outgoing" {
+					title = fmt.Sprintf("🎉 %s", title)
+				} else {
+					title = fmt.Sprintf("🪿 %s", title)
+				}
+			} else {
+				title = fmt.Sprintf("• %s", title)
+			}
+		}
+		
+		titles = append(titles, title)
+	}
+	
+	return titles
+}
+
 // rebuildMenu completely rebuilds the menu from scratch.
 func (app *App) rebuildMenu(ctx context.Context) {
 	// Rebuild entire menu
@@ -478,7 +583,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 
 	// Audio cues
 	// Add 'Audio cues' option
-	audioItem := systray.AddMenuItem("Audio cues", "Play sounds for notifications")
+	audioItem := systray.AddMenuItem("Honks enabled", "Play sounds for notifications")
 	app.mu.RLock()
 	if app.enableAudioCues {
 		audioItem.Check()
