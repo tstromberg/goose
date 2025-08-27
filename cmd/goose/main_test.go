@@ -299,6 +299,7 @@ func TestSoundPlaybackDuringTransitions(t *testing.T) {
 		enableAudioCues:     true,
 		initialLoadComplete: true, // Set to true to allow sound playback
 		menuInitialized:     true,
+		lastMenuTitles:      []string{"placeholder"}, // Initialize to prevent menu rebuilds during testing
 	}
 
 	tests := []struct {
