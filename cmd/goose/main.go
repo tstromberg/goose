@@ -538,6 +538,10 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 			// Create initial menu despite error
 			app.rebuildMenu(ctx)
 			app.menuInitialized = true
+			// Store initial menu titles to prevent unnecessary rebuild on first update
+			app.mu.Lock()
+			app.lastMenuTitles = app.generateMenuTitles()
+			app.mu.Unlock()
 			// Menu initialization complete
 		}
 		return
@@ -580,6 +584,10 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		// Initialize menu structure
 		app.rebuildMenu(ctx)
 		app.menuInitialized = true
+		// Store initial menu titles to prevent unnecessary rebuild on first update
+		app.mu.Lock()
+		app.lastMenuTitles = app.generateMenuTitles()
+		app.mu.Unlock()
 		// Menu initialization complete
 	} else {
 		app.updateMenu(ctx)
