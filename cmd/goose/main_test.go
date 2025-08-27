@@ -63,6 +63,7 @@ func TestMenuItemTitleTransition(t *testing.T) {
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
 		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	// Test incoming PR that just became blocked
@@ -174,6 +175,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	tests := []struct {
@@ -444,6 +446,7 @@ func TestSoundDisabledNoPlayback(t *testing.T) {
 		enableAudioCues:     false, // Audio disabled
 		initialLoadComplete: true,
 		menuInitialized:     true,
+		systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	// Note: We verify behavior through state changes rather than direct sound capture
@@ -484,6 +487,7 @@ func TestGracePeriodPreventsNotifications(t *testing.T) {
 		initialLoadComplete: true,
 		menuInitialized:     true,
 		startTime:           time.Now(), // Just started
+		systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	// Track whether we're in grace period for verification
@@ -608,6 +612,7 @@ func TestNotificationScenarios(t *testing.T) {
 				initialLoadComplete: tt.initialLoadComplete,
 				menuInitialized:     true,
 				startTime:           time.Now().Add(-tt.timeSinceStart),
+				systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 			}
 
 			// Set up previous state
@@ -667,6 +672,7 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 		initialLoadComplete: true, // Already past initial load
 		menuInitialized:     true,
 		startTime:           time.Now().Add(-35 * time.Second), // Started 35 seconds ago
+		systrayInterface:    &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	// Start with no blocked PRs

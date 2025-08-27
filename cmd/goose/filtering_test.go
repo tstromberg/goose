@@ -21,6 +21,7 @@ func TestCountPRsWithHiddenOrgs(t *testing.T) {
 			"org2": true, // Hide org2
 		},
 		hideStaleIncoming: false,
+		systrayInterface: &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	counts := app.countPRs()
@@ -58,6 +59,7 @@ func TestCountPRsWithStalePRs(t *testing.T) {
 		},
 		hiddenOrgs:        map[string]bool{},
 		hideStaleIncoming: true, // Hide stale PRs
+		systrayInterface:  &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	counts := app.countPRs()
@@ -99,6 +101,7 @@ func TestCountPRsWithBothFilters(t *testing.T) {
 			"org2": true,
 		},
 		hideStaleIncoming: true,
+		systrayInterface: &MockSystray{}, // Use mock systray to avoid panics
 	}
 
 	counts := app.countPRs()
