@@ -1,0 +1,153 @@
+// Package main - pr_state.go provides simplified PR state management.
+package main
+
+import (
+	"log"
+	"sync"
+	"time"
+)
+
+// PRState tracks the complete state of a PR including blocking history.
+type PRState struct {
+	PR              PR
+	FirstBlockedAt  time.Time
+	LastSeenBlocked time.Time
+	HasNotified     bool // Have we already notified about this PR being blocked?
+}
+
+// PRStateManager manages all PR states with proper synchronization.
+type PRStateManager struct {
+	mu     sync.RWMutex
+	states map[string]*PRState // Key is PR URL
+
+	// Configuration
+	startTime          time.Time
+	gracePeriodSeconds int
+}
+
+// NewPRStateManager creates a new PR state manager.
+func NewPRStateManager(startTime time.Time) *PRStateManager {
+	return &PRStateManager{
+		states:             make(map[string]*PRState),
+		startTime:          startTime,
+		gracePeriodSeconds: 30,
+	}
+}
+
+// UpdatePRs updates the state with new PR data and returns which PRs need notifications.
+// This function is thread-safe and handles all state transitions atomically.
+func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[string]bool) (toNotify []PR) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	inGracePeriod := time.Since(m.startTime) < time.Duration(m.gracePeriodSeconds)*time.Second
+
+	// Track which PRs are currently blocked
+	currentlyBlocked := make(map[string]bool)
+
+	// Process all PRs (both incoming and outgoing)
+	allPRs := make([]PR, 0, len(incoming)+len(outgoing))
+	allPRs = append(allPRs, incoming...)
+	allPRs = append(allPRs, outgoing...)
+
+	for i := range allPRs {
+		pr := allPRs[i]
+		// Skip hidden orgs
+		org := extractOrgFromRepo(pr.Repository)
+		if org != "" && hiddenOrgs[org] {
+			continue
+		}
+
+		// Check if PR is blocked
+		isBlocked := pr.NeedsReview || pr.IsBlocked
+		if !isBlocked {
+			// PR is not blocked - remove from tracking if it was
+			if state, exists := m.states[pr.URL]; exists && state != nil {
+				log.Printf("[STATE] PR no longer blocked: %s #%d", pr.Repository, pr.Number)
+				delete(m.states, pr.URL)
+			}
+			continue
+		}
+
+		currentlyBlocked[pr.URL] = true
+
+		// Get or create state for this PR
+		state, exists := m.states[pr.URL]
+		if !exists {
+			// New blocked PR!
+			state = &PRState{
+				PR:              pr,
+				FirstBlockedAt:  now,
+				LastSeenBlocked: now,
+				HasNotified:     false,
+			}
+			m.states[pr.URL] = state
+
+			log.Printf("[STATE] New blocked PR detected: %s #%d", pr.Repository, pr.Number)
+
+			// Should we notify?
+			if !inGracePeriod && !state.HasNotified {
+				log.Printf("[STATE] Will notify for newly blocked PR: %s #%d", pr.Repository, pr.Number)
+				toNotify = append(toNotify, pr)
+				state.HasNotified = true
+			} else if inGracePeriod {
+				log.Printf("[STATE] In grace period, not notifying for: %s #%d", pr.Repository, pr.Number)
+			}
+		} else {
+			// PR was already blocked
+			state.LastSeenBlocked = now
+			state.PR = pr // Update PR data
+
+			// If we haven't notified yet and we're past grace period, notify now
+			if !state.HasNotified && !inGracePeriod {
+				log.Printf("[STATE] Past grace period, notifying for previously blocked PR: %s #%d",
+					pr.Repository, pr.Number)
+				toNotify = append(toNotify, pr)
+				state.HasNotified = true
+			}
+		}
+	}
+
+	// Clean up states for PRs that are no longer in our lists
+	for url := range m.states {
+		if !currentlyBlocked[url] {
+			log.Printf("[STATE] Removing stale state for PR: %s", url)
+			delete(m.states, url)
+		}
+	}
+
+	return toNotify
+}
+
+// GetBlockedPRs returns all currently blocked PRs with their states.
+func (m *PRStateManager) GetBlockedPRs() map[string]*PRState {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make(map[string]*PRState)
+	for url, state := range m.states {
+		result[url] = state
+	}
+	return result
+}
+
+// GetPRState returns the state for a specific PR.
+func (m *PRStateManager) GetPRState(url string) (*PRState, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	state, exists := m.states[url]
+	return state, exists
+}
+
+// ResetNotifications resets the notification flag for all PRs (useful for testing).
+func (m *PRStateManager) ResetNotifications() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, state := range m.states {
+		state.HasNotified = false
+	}
+	log.Printf("[STATE] Reset notification flags for %d PRs", len(m.states))
+}

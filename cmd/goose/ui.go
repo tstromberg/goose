@@ -213,20 +213,35 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
 		// Add bullet point or emoji for blocked PRs
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
-			// Show emoji for PRs blocked within the last 25 minutes
-			if !sortedPRs[prIndex].FirstBlockedAt.IsZero() && time.Since(sortedPRs[prIndex].FirstBlockedAt) < blockedPRIconDuration {
+			// Get the blocked time from state manager
+			prState, hasState := app.stateManager.GetPRState(sortedPRs[prIndex].URL)
+
+			// Show emoji for PRs blocked within the last 5 minutes
+			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
+				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				// Use party popper for outgoing PRs, goose for incoming PRs
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
-					log.Printf("[MENU] Adding party popper to outgoing PR: %s (blocked %v ago)",
-						sortedPRs[prIndex].URL, time.Since(sortedPRs[prIndex].FirstBlockedAt))
+					log.Printf("[MENU] Adding party popper to outgoing PR: %s (blocked %v ago, %v remaining)",
+						sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration-timeSinceBlocked)
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
-					log.Printf("[MENU] Adding goose to incoming PR: %s (blocked %v ago)",
-						sortedPRs[prIndex].URL, time.Since(sortedPRs[prIndex].FirstBlockedAt))
+					log.Printf("[MENU] Adding goose to incoming PR: %s (blocked %v ago, %v remaining)",
+						sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration-timeSinceBlocked)
 				}
 			} else {
 				title = fmt.Sprintf("• %s", title)
+				// Log when we transition from emoji to bullet point
+				if hasState && !prState.FirstBlockedAt.IsZero() {
+					timeSinceBlocked := time.Since(prState.FirstBlockedAt)
+					if sectionTitle == "Outgoing" {
+						log.Printf("[MENU] Removing party popper from outgoing PR: %s (blocked %v ago, exceeded %v duration)",
+							sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration)
+					} else {
+						log.Printf("[MENU] Removing goose from incoming PR: %s (blocked %v ago, exceeded %v duration)",
+							sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration)
+					}
+				}
 			}
 		}
 		// Format age inline for tooltip

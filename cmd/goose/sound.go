@@ -92,6 +92,12 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 		return
 	}
 
+	// Check if we're in test mode (environment variable set by tests)
+	if os.Getenv("GOOSE_TEST_MODE") == "1" {
+		log.Printf("[SOUND] Test mode - skipping actual sound playback of %s", soundPath)
+		return
+	}
+
 	// Play sound in background
 	go func() {
 		// Use a timeout context for sound playback

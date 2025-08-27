@@ -11,14 +11,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/energye/systray"
-	"github.com/gen2brain/beeep"
 	"github.com/google/go-github/v57/github"
 	"github.com/ready-to-review/turnclient/pkg/turn"
 )
@@ -37,7 +35,7 @@ const (
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
 	defaultUpdateInterval     = 1 * time.Minute
-	blockedPRIconDuration     = 1 * time.Minute
+	blockedPRIconDuration     = 5 * time.Minute
 	maxRetryDelay             = 2 * time.Minute
 	maxRetries                = 10
 	minorFailureThreshold     = 3
@@ -46,6 +44,7 @@ const (
 	turnAPITimeout            = 10 * time.Second
 	maxConcurrentTurnAPICalls = 20
 	defaultMaxBrowserOpensDay = 20
+	startupGracePeriod        = 30 * time.Second // Don't play sounds or auto-open for first 30 seconds
 )
 
 // PR represents a pull request with metadata.
@@ -69,20 +68,16 @@ type App struct {
 	client              *github.Client
 	turnClient          *turn.Client
 	currentUser         *github.User
-	previousBlockedPRs  map[string]bool
-	blockedPRTimes      map[string]time.Time
+	stateManager        *PRStateManager // NEW: Centralized state management
 	browserRateLimiter  *BrowserRateLimiter
 	targetUser          string
 	cacheDir            string
 	authError           string
-	// Removed pendingTurnResults - simplified to synchronous approach
-	// Removed lastMenuTitles and lastMenuRebuild - simplified to always rebuild
 	incoming            []PR
 	outgoing            []PR
 	updateInterval      time.Duration
 	consecutiveFailures int
 	mu                  sync.RWMutex
-	// Removed loadingTurnData - simplified to synchronous approach
 	menuInitialized     bool
 	initialLoadComplete bool
 	enableAudioCues     bool
@@ -91,6 +86,11 @@ type App struct {
 	noCache             bool
 	hiddenOrgs          map[string]bool
 	seenOrgs            map[string]bool
+
+	// Deprecated: These fields are kept for backward compatibility with tests
+	// The actual state is managed by stateManager
+	previousBlockedPRs map[string]bool      // Deprecated: use stateManager
+	blockedPRTimes     map[string]time.Time // Deprecated: use stateManager
 }
 
 func loadCurrentUser(ctx context.Context, app *App) {
@@ -200,21 +200,23 @@ func main() {
 		log.Fatalf("Failed to create cache directory: %v", err)
 	}
 
+	startTime := time.Now()
 	app := &App{
 		cacheDir:           cacheDir,
 		hideStaleIncoming:  true,
-		previousBlockedPRs: make(map[string]bool),
-		blockedPRTimes:     make(map[string]time.Time),
+		stateManager:       NewPRStateManager(startTime), // NEW: Simplified state tracking
 		targetUser:         targetUser,
 		noCache:            noCache,
 		updateInterval:     updateInterval,
-		// Removed pendingTurnResults initialization - simplified to synchronous
 		enableAudioCues:    true,
 		enableAutoBrowser:  false, // Default to false for safety
 		browserRateLimiter: NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
-		startTime:          time.Now(),
+		startTime:          startTime,
 		seenOrgs:           make(map[string]bool),
 		hiddenOrgs:         make(map[string]bool),
+		// Deprecated fields for test compatibility
+		previousBlockedPRs: make(map[string]bool),
+		blockedPRTimes:     make(map[string]time.Time),
 	}
 
 	// Load saved settings
@@ -434,10 +436,12 @@ func (app *App) updatePRs(ctx context.Context) {
 	}
 	app.mu.Unlock()
 
-	// Don't check for newly blocked PRs here - wait for Turn data
-	// Turn data will be applied asynchronously and will trigger the check
-
 	app.updateMenu(ctx)
+
+	// Process notifications using the simplified state manager
+	log.Print("[DEBUG] Processing PR state updates and notifications")
+	app.updatePRStatesAndNotify(ctx)
+	log.Print("[DEBUG] Completed PR state updates and notifications")
 }
 
 // updateMenu rebuilds the menu every time - simple and reliable.
@@ -497,6 +501,25 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	app.mu.Lock()
 	app.incoming = incoming
 	app.outgoing = outgoing
+
+	// Debug logging to track PR states
+	blockedIncoming := 0
+	for i := range incoming {
+		if incoming[i].NeedsReview {
+			blockedIncoming++
+		}
+	}
+	blockedOutgoing := 0
+	for i := range outgoing {
+		if outgoing[i].IsBlocked {
+			blockedOutgoing++
+			log.Printf("[DEBUG] Blocked outgoing PR: %s #%d (URL: %s)",
+				outgoing[i].Repository, outgoing[i].Number, outgoing[i].URL)
+		}
+	}
+	log.Printf("[DEBUG] updatePRsInternal: Setting app state with %d incoming (%d blocked), %d outgoing (%d blocked)",
+		len(incoming), blockedIncoming, len(outgoing), blockedOutgoing)
+
 	app.mu.Unlock()
 
 	// Create initial menu after first successful data load
@@ -510,14 +533,16 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.updateMenu(ctx)
 	}
 
+	// Process notifications using the simplified state manager
+	log.Print("[DEBUG] Processing PR state updates and notifications")
+	app.updatePRStatesAndNotify(ctx)
+	log.Print("[DEBUG] Completed PR state updates and notifications")
 	// Mark initial load as complete after first successful update
 	if !app.initialLoadComplete {
 		app.mu.Lock()
 		app.initialLoadComplete = true
 		app.mu.Unlock()
 	}
-	// Check for newly blocked PRs
-	app.checkForNewlyBlockedPRs(ctx)
 }
 
 // tryAutoOpenPR attempts to open a PR in the browser if enabled and rate limits allow.
@@ -545,226 +570,9 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled boo
 	}
 }
 
-// notifyWithSound sends a notification and plays sound only once per cycle.
-func (app *App) notifyWithSound(ctx context.Context, pr PR, isIncoming bool, playedSound *bool) {
-	var title, soundType string
-	if isIncoming {
-		title = "PR Blocked on You 🪿"
-		soundType = "honk"
-	} else {
-		title = "Your PR is Blocked 🚀"
-		soundType = "rocket"
-	}
-
-	message := fmt.Sprintf("%s #%d: %s", pr.Repository, pr.Number, pr.Title)
-	if err := beeep.Notify(title, message, ""); err != nil {
-		log.Printf("Failed to send notification for %s: %v", pr.URL, err)
-	}
-
-	// Play sound only once per refresh cycle
-	if !*playedSound {
-		log.Printf("[SOUND] Playing %s sound for PR: %s #%d - %s", soundType, pr.Repository, pr.Number, pr.Title)
-		app.playSound(ctx, soundType)
-		*playedSound = true
-	}
-}
-
-// checkForNewlyBlockedPRs sends notifications for blocked PRs.
+// checkForNewlyBlockedPRs provides backward compatibility for tests
+// while using the new state manager internally.
 func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
-	// Check for context cancellation early
-	select {
-	case <-ctx.Done():
-		log.Print("[BLOCKED] Context cancelled, skipping newly blocked PR check")
-		return
-	default:
-	}
-
-	app.mu.Lock()
-	// Make deep copies to work with while holding the lock
-	incoming := make([]PR, len(app.incoming))
-	copy(incoming, app.incoming)
-	outgoing := make([]PR, len(app.outgoing))
-	copy(outgoing, app.outgoing)
-	previousBlocked := app.previousBlockedPRs
-
-	// Clean up blockedPRTimes first to remove stale entries
-	// Only keep blocked times for PRs that are actually in the current lists
-	cleanedBlockedTimes := make(map[string]time.Time)
-	for i := range app.incoming {
-		if blockTime, exists := app.blockedPRTimes[app.incoming[i].URL]; exists {
-			cleanedBlockedTimes[app.incoming[i].URL] = blockTime
-		}
-	}
-	for i := range app.outgoing {
-		if blockTime, exists := app.blockedPRTimes[app.outgoing[i].URL]; exists {
-			cleanedBlockedTimes[app.outgoing[i].URL] = blockTime
-		}
-	}
-
-	// Get hidden orgs for filtering
-	hiddenOrgs := make(map[string]bool)
-	for org, hidden := range app.hiddenOrgs {
-		hiddenOrgs[org] = hidden
-	}
-
-	// Log any removed entries
-	removedCount := 0
-	for url := range app.blockedPRTimes {
-		if _, exists := cleanedBlockedTimes[url]; !exists {
-			log.Printf("[BLOCKED] Removing stale blocked time for PR no longer in list: %s", url)
-			removedCount++
-		}
-	}
-	if removedCount > 0 {
-		log.Printf("[BLOCKED] Cleaned up %d stale blocked PR times", removedCount)
-	}
-
-	// Update the app's blockedPRTimes to the cleaned version to prevent memory growth
-	app.blockedPRTimes = cleanedBlockedTimes
-	blockedTimes := cleanedBlockedTimes
-	autoBrowserEnabled := app.enableAutoBrowser
-	startTime := app.startTime
-	hideStaleIncoming := app.hideStaleIncoming
-	app.mu.Unlock()
-
-	currentBlocked := make(map[string]bool)
-	newBlockedTimes := make(map[string]time.Time)
-	playedHonk := false
-	playedJet := false
-	now := time.Now()
-	staleThreshold := now.Add(-stalePRThreshold)
-
-	// Check incoming PRs
-	for i := range incoming {
-		// Skip PRs from hidden orgs for notifications
-		org := extractOrgFromRepo(incoming[i].Repository)
-		if org != "" && hiddenOrgs[org] {
-			continue
-		}
-
-		if !incoming[i].NeedsReview {
-			continue
-		}
-
-		pr := &incoming[i]
-		currentBlocked[pr.URL] = true
-
-		if previousBlocked[pr.URL] {
-			// PR was blocked before and is still blocked - preserve timestamp
-			if blockedTime, exists := blockedTimes[pr.URL]; exists {
-				newBlockedTimes[pr.URL] = blockedTime
-				pr.FirstBlockedAt = blockedTime
-				log.Printf("[BLOCKED] Preserving FirstBlockedAt for still-blocked incoming PR: %s #%d (blocked since %v, %v ago)",
-					pr.Repository, pr.Number, blockedTime, time.Since(blockedTime))
-			} else {
-				// Edge case: PR was marked as blocked but timestamp is missing
-				log.Printf("[BLOCKED] WARNING: Missing timestamp for previously blocked incoming PR: %s #%d - setting new timestamp",
-					pr.Repository, pr.Number)
-				newBlockedTimes[pr.URL] = now
-				pr.FirstBlockedAt = now
-			}
-		} else {
-			// PR is newly blocked (wasn't blocked in previous check)
-			newBlockedTimes[pr.URL] = now
-			pr.FirstBlockedAt = now
-			log.Printf("[BLOCKED] Setting FirstBlockedAt for incoming PR: %s #%d at %v",
-				pr.Repository, pr.Number, now)
-
-			// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
-			isStale := pr.UpdatedAt.Before(staleThreshold)
-			if hideStaleIncoming && isStale {
-				log.Printf("[BLOCKED] New incoming PR blocked (stale, skipping): %s #%d - %s",
-					pr.Repository, pr.Number, pr.Title)
-			} else {
-				log.Printf("[BLOCKED] New incoming PR blocked: %s #%d - %s",
-					pr.Repository, pr.Number, pr.Title)
-				app.notifyWithSound(ctx, *pr, true, &playedHonk)
-				app.tryAutoOpenPR(ctx, *pr, autoBrowserEnabled, startTime)
-			}
-		}
-	}
-
-	// Check outgoing PRs
-	for i := range outgoing {
-		// Skip PRs from hidden orgs for notifications
-		org := extractOrgFromRepo(outgoing[i].Repository)
-		if org != "" && hiddenOrgs[org] {
-			continue
-		}
-
-		if !outgoing[i].IsBlocked {
-			continue
-		}
-
-		pr := &outgoing[i]
-		currentBlocked[pr.URL] = true
-
-		if previousBlocked[pr.URL] {
-			// PR was blocked before and is still blocked - preserve timestamp
-			if blockedTime, exists := blockedTimes[pr.URL]; exists {
-				newBlockedTimes[pr.URL] = blockedTime
-				pr.FirstBlockedAt = blockedTime
-				log.Printf("[BLOCKED] Preserving FirstBlockedAt for still-blocked outgoing PR: %s #%d (blocked since %v, %v ago)",
-					pr.Repository, pr.Number, blockedTime, time.Since(blockedTime))
-			} else {
-				// Edge case: PR was marked as blocked but timestamp is missing
-				log.Printf("[BLOCKED] WARNING: Missing timestamp for previously blocked outgoing PR: %s #%d - setting new timestamp",
-					pr.Repository, pr.Number)
-				newBlockedTimes[pr.URL] = now
-				pr.FirstBlockedAt = now
-			}
-		} else {
-			// PR is newly blocked (wasn't blocked in previous check)
-			newBlockedTimes[pr.URL] = now
-			pr.FirstBlockedAt = now
-			log.Printf("[BLOCKED] Setting FirstBlockedAt for outgoing PR: %s #%d at %v",
-				pr.Repository, pr.Number, now)
-
-			// Skip sound and auto-open for stale PRs when hideStaleIncoming is enabled
-			isStale := pr.UpdatedAt.Before(staleThreshold)
-			if hideStaleIncoming && isStale {
-				log.Printf("[BLOCKED] New outgoing PR blocked (stale, skipping): %s #%d - %s",
-					pr.Repository, pr.Number, pr.Title)
-			} else {
-				// Add delay if we already played honk sound
-				if playedHonk && !playedJet {
-					time.Sleep(2 * time.Second)
-				}
-				log.Printf("[BLOCKED] New outgoing PR blocked: %s #%d - %s",
-					pr.Repository, pr.Number, pr.Title)
-				app.notifyWithSound(ctx, *pr, false, &playedJet)
-				app.tryAutoOpenPR(ctx, *pr, autoBrowserEnabled, startTime)
-			}
-		}
-	}
-
-	// Update state with a lock
-	app.mu.Lock()
-	app.previousBlockedPRs = currentBlocked
-	app.blockedPRTimes = newBlockedTimes
-	// Update the PR lists with FirstBlockedAt times
-	app.incoming = incoming
-	app.outgoing = outgoing
-	menuInitialized := app.menuInitialized
-	app.mu.Unlock()
-
-	// Update UI after releasing the lock
-	// Check if the set of blocked PRs has changed
-	blockedPRsChanged := !reflect.DeepEqual(currentBlocked, previousBlocked)
-
-	// Update UI if blocked PRs changed or if we cleaned up stale entries
-	if menuInitialized && (blockedPRsChanged || removedCount > 0) {
-		switch {
-		case len(currentBlocked) > len(previousBlocked):
-			log.Print("[BLOCKED] Updating UI for newly blocked PRs")
-		case len(currentBlocked) < len(previousBlocked):
-			log.Print("[BLOCKED] Updating UI - blocked PRs were removed")
-		case blockedPRsChanged:
-			log.Print("[BLOCKED] Updating UI - blocked PRs changed (same count)")
-		default:
-			log.Printf("[BLOCKED] Updating UI after cleaning up %d stale entries", removedCount)
-		}
-		// updateMenu will call setTrayTitle via rebuildMenu
-		app.updateMenu(ctx)
-	}
+	// Simply delegate to the new implementation
+	app.updatePRStatesAndNotify(ctx)
 }
