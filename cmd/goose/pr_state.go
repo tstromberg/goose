@@ -2,7 +2,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -62,7 +62,7 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 		if !isBlocked {
 			// PR is not blocked - remove from tracking if it was
 			if state, exists := m.states[pr.URL]; exists && state != nil {
-				log.Printf("[STATE] PR no longer blocked: %s #%d", pr.Repository, pr.Number)
+				slog.Info("[STATE] PR no longer blocked", "repo", pr.Repository, "number", pr.Number)
 				delete(m.states, pr.URL)
 			}
 			continue
@@ -82,15 +82,15 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 			}
 			m.states[pr.URL] = state
 
-			log.Printf("[STATE] New blocked PR detected: %s #%d", pr.Repository, pr.Number)
+			slog.Info("[STATE] New blocked PR detected", "repo", pr.Repository, "number", pr.Number)
 
 			// Should we notify?
 			if !inGracePeriod && !state.HasNotified {
-				log.Printf("[STATE] Will notify for newly blocked PR: %s #%d", pr.Repository, pr.Number)
+				slog.Debug("[STATE] Will notify for newly blocked PR", "repo", pr.Repository, "number", pr.Number)
 				toNotify = append(toNotify, pr)
 				state.HasNotified = true
 			} else if inGracePeriod {
-				log.Printf("[STATE] In grace period, not notifying for: %s #%d", pr.Repository, pr.Number)
+				slog.Debug("[STATE] In grace period, not notifying", "repo", pr.Repository, "number", pr.Number)
 			}
 		} else {
 			// PR was already blocked
@@ -99,8 +99,8 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 
 			// If we haven't notified yet and we're past grace period, notify now
 			if !state.HasNotified && !inGracePeriod {
-				log.Printf("[STATE] Past grace period, notifying for previously blocked PR: %s #%d",
-					pr.Repository, pr.Number)
+				slog.Info("[STATE] Past grace period, notifying for previously blocked PR",
+					"repo", pr.Repository, "number", pr.Number)
 				toNotify = append(toNotify, pr)
 				state.HasNotified = true
 			}
@@ -110,7 +110,7 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 	// Clean up states for PRs that are no longer in our lists
 	for url := range m.states {
 		if !currentlyBlocked[url] {
-			log.Printf("[STATE] Removing stale state for PR: %s", url)
+			slog.Debug("[STATE] Removing stale state for PR", "url", url)
 			delete(m.states, url)
 		}
 	}
@@ -147,5 +147,5 @@ func (m *PRStateManager) ResetNotifications() {
 	for _, state := range m.states {
 		state.HasNotified = false
 	}
-	log.Printf("[STATE] Reset notification flags for %d PRs", len(m.states))
+	slog.Info("[STATE] Reset notification flags", "prCount", len(m.states))
 }

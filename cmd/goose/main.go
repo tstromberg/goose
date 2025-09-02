@@ -8,7 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,10 +95,10 @@ type App struct {
 }
 
 func loadCurrentUser(ctx context.Context, app *App) {
-	log.Println("Loading current user...")
+	slog.Info("Loading current user...")
 
 	if app.client == nil {
-		log.Println("Skipping user load - no GitHub client available")
+		slog.Info("Skipping user load - no GitHub client available")
 		return
 	}
 
@@ -107,7 +107,7 @@ func loadCurrentUser(ctx context.Context, app *App) {
 		var retryErr error
 		user, _, retryErr = app.client.Users.Get(ctx, "")
 		if retryErr != nil {
-			log.Printf("GitHub Users.Get failed (will retry): %v", retryErr)
+			slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
 			return retryErr
 		}
 		return nil
@@ -116,12 +116,12 @@ func loadCurrentUser(ctx context.Context, app *App) {
 		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
 		retry.MaxDelay(maxRetryDelay),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("[GITHUB] Users.Get retry %d/%d: %v", n+1, maxRetries, err)
+			slog.Warn("[GITHUB] Users.Get retry", "attempt", n+1, "maxRetries", maxRetries, "error", err)
 		}),
 		retry.Context(ctx),
 	)
 	if err != nil {
-		log.Printf("Warning: Failed to load current user after %d retries: %v", maxRetries, err)
+		slog.Warn("Failed to load current user after retries", "maxRetries", maxRetries, "error", err)
 		if app.authError == "" {
 			app.authError = fmt.Sprintf("Failed to load user: %v", err)
 		}
@@ -129,14 +129,14 @@ func loadCurrentUser(ctx context.Context, app *App) {
 	}
 
 	if user == nil {
-		log.Print("Warning: GitHub API returned nil user")
+		slog.Warn("GitHub API returned nil user")
 		return
 	}
 
 	app.currentUser = user
 	// Log if we're using a different target user (sanitized)
 	if app.targetUser != "" && app.targetUser != user.GetLogin() {
-		log.Printf("Querying PRs for user '%s' instead of authenticated user", sanitizeForLog(app.targetUser))
+		slog.Info("Querying PRs for different user", "targetUser", sanitizeForLog(app.targetUser))
 	}
 }
 
@@ -159,46 +159,53 @@ func main() {
 	// Validate target user if provided
 	if targetUser != "" {
 		if err := validateGitHubUsername(targetUser); err != nil {
-			log.Fatalf("Invalid target user: %v", err)
+			slog.Error("Invalid target user", "error", err)
+			os.Exit(1)
 		}
 	}
 
 	// Validate update interval
 	if updateInterval < minUpdateInterval {
-		log.Printf("Update interval %v too short, using minimum of %v", updateInterval, minUpdateInterval)
+		slog.Warn("Update interval too short, using minimum", "requested", updateInterval, "minimum", minUpdateInterval)
 		updateInterval = minUpdateInterval
 	}
 
 	// Validate browser rate limit parameters
 	if maxBrowserOpensMinute < 0 {
-		log.Printf("Invalid browser-max-per-minute %d, using default of 2", maxBrowserOpensMinute)
+		slog.Warn("Invalid browser-max-per-minute, using default", "invalid", maxBrowserOpensMinute, "default", 2)
 		maxBrowserOpensMinute = 2
 	}
 	if maxBrowserOpensDay < 0 {
-		log.Printf("Invalid browser-max-per-day %d, using default of %d", maxBrowserOpensDay, defaultMaxBrowserOpensDay)
+		slog.Warn("Invalid browser-max-per-day, using default", "invalid", maxBrowserOpensDay, "default", defaultMaxBrowserOpensDay)
 		maxBrowserOpensDay = defaultMaxBrowserOpensDay
 	}
 	if browserOpenDelay < 0 {
-		log.Printf("Invalid browser-delay %v, using default of 1 minute", browserOpenDelay)
+		slog.Warn("Invalid browser-delay, using default", "invalid", browserOpenDelay, "default", "1m")
 		browserOpenDelay = 1 * time.Minute
 	}
 
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("Starting GitHub PR Monitor (version=%s, commit=%s, date=%s)", version, commit, date)
-	log.Printf("Configuration: update_interval=%v, max_retries=%d, max_delay=%v", updateInterval, maxRetries, maxRetryDelay)
-	log.Printf("Browser auto-open: startup_delay=%v, max_per_minute=%d, max_per_day=%d",
-		browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay)
+	// Set up structured logging with source location
+	opts := &slog.HandlerOptions{
+		AddSource: true,
+		Level:     slog.LevelInfo,
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
+	slog.Info("Starting GitHub PR Monitor", "version", version, "commit", commit, "date", date)
+	slog.Info("Configuration", "update_interval", updateInterval, "max_retries", maxRetries, "max_delay", maxRetryDelay)
+	slog.Info("Browser auto-open configuration", "startup_delay", browserOpenDelay, "max_per_minute", maxBrowserOpensMinute, "max_per_day", maxBrowserOpensDay)
 
 	ctx := context.Background()
 
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
-		log.Fatalf("Failed to get cache directory: %v", err)
+		slog.Error("Failed to get cache directory", "error", err)
+		os.Exit(1)
 	}
 	cacheDir = filepath.Join(cacheDir, "review-goose")
 	const dirPerm = 0o700 // Only owner can access cache directory
 	if err := os.MkdirAll(cacheDir, dirPerm); err != nil {
-		log.Fatalf("Failed to create cache directory: %v", err)
+		slog.Error("Failed to create cache directory", "error", err)
+		os.Exit(1)
 	}
 
 	startTime := time.Now()
@@ -224,10 +231,10 @@ func main() {
 	// Load saved settings
 	app.loadSettings()
 
-	log.Println("Initializing GitHub clients...")
+	slog.Info("Initializing GitHub clients...")
 	err = app.initClients(ctx)
 	if err != nil {
-		log.Printf("Warning: Failed to initialize clients: %v", err)
+		slog.Warn("Failed to initialize clients", "error", err)
 		app.authError = err.Error()
 		// Continue running with auth error - will show error in UI
 	}
@@ -235,24 +242,24 @@ func main() {
 	// Load current user if we have a client
 	loadCurrentUser(ctx, app)
 
-	log.Println("Starting systray...")
+	slog.Info("Starting systray...")
 	// Create a cancellable context for the application
 	appCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	systray.Run(func() { app.onReady(appCtx) }, func() {
-		log.Println("Shutting down application")
+		slog.Info("Shutting down application")
 		cancel() // Cancel the context to stop goroutines
 		app.cleanupOldCache()
 	})
 }
 
 func (app *App) onReady(ctx context.Context) {
-	log.Println("System tray ready")
+	slog.Info("System tray ready")
 
 	// Set up click handlers first (needed for both success and error states)
 	systray.SetOnClick(func(menu systray.IMenu) {
-		log.Println("Icon clicked")
+		slog.Debug("Icon clicked")
 
 		// Check if we can perform a forced refresh (rate limited to every 10 seconds)
 		app.mu.RLock()
@@ -260,27 +267,27 @@ func (app *App) onReady(ctx context.Context) {
 		app.mu.RUnlock()
 
 		if timeSinceLastSearch >= minUpdateInterval {
-			log.Printf("[CLICK] Forcing search refresh (last search %v ago)", timeSinceLastSearch)
+			slog.Info("[CLICK] Forcing search refresh", "lastSearchAgo", timeSinceLastSearch)
 			go func() {
 				app.updatePRs(ctx)
 			}()
 		} else {
 			remainingTime := minUpdateInterval - timeSinceLastSearch
-			log.Printf("[CLICK] Rate limited - search performed %v ago, %v remaining", timeSinceLastSearch, remainingTime)
+			slog.Debug("[CLICK] Rate limited", "lastSearchAgo", timeSinceLastSearch, "remaining", remainingTime)
 		}
 
 		if menu != nil {
 			if err := menu.ShowMenu(); err != nil {
-				log.Printf("Failed to show menu: %v", err)
+				slog.Error("Failed to show menu", "error", err)
 			}
 		}
 	})
 
 	systray.SetOnRClick(func(menu systray.IMenu) {
-		log.Println("Right click detected")
+		slog.Debug("Right click detected")
 		if menu != nil {
 			if err := menu.ShowMenu(); err != nil {
-				log.Printf("Failed to show menu: %v", err)
+				slog.Error("Failed to show menu", "error", err)
 			}
 		}
 	})
@@ -316,7 +323,7 @@ func (app *App) updateLoop(ctx context.Context) {
 	// Recover from panics to keep the update loop running
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("PANIC in update loop: %v", r)
+			slog.Error("PANIC in update loop", "panic", r)
 
 			// Set error state in UI
 			systray.SetTitle("💥")
@@ -328,14 +335,14 @@ func (app *App) updateLoop(ctx context.Context) {
 			app.mu.Unlock()
 
 			// Signal app to quit after panic
-			log.Println("Update loop panic - signaling quit")
+			slog.Error("Update loop panic - signaling quit")
 			systray.Quit()
 		}
 	}()
 
 	ticker := time.NewTicker(app.updateInterval)
 	defer ticker.Stop()
-	log.Printf("[UPDATE] Update loop started with interval: %v", app.updateInterval)
+	slog.Info("[UPDATE] Update loop started", "interval", app.updateInterval)
 
 	// Initial update with wait for Turn data
 	app.updatePRsWithWait(ctx)
@@ -349,15 +356,14 @@ func (app *App) updateLoop(ctx context.Context) {
 			app.mu.RUnlock()
 
 			if timeSinceLastSearch >= minUpdateInterval {
-				log.Println("Running scheduled PR update")
+				slog.Debug("Running scheduled PR update")
 				app.updatePRs(ctx)
 			} else {
 				remainingTime := minUpdateInterval - timeSinceLastSearch
-				log.Printf("Skipping scheduled update - recent search %v ago, %v remaining until next allowed",
-					timeSinceLastSearch, remainingTime)
+				slog.Debug("Skipping scheduled update", "recentSearchAgo", timeSinceLastSearch, "remaining", remainingTime)
 			}
 		case <-ctx.Done():
-			log.Println("Update loop stopping due to context cancellation")
+			slog.Info("Update loop stopping due to context cancellation")
 			return
 		}
 	}
@@ -366,7 +372,7 @@ func (app *App) updateLoop(ctx context.Context) {
 func (app *App) updatePRs(ctx context.Context) {
 	incoming, outgoing, err := app.fetchPRsInternal(ctx)
 	if err != nil {
-		log.Printf("Error fetching PRs: %v", err)
+		slog.Error("Error fetching PRs", "error", err)
 		app.mu.Lock()
 		app.consecutiveFailures++
 		failureCount := app.consecutiveFailures
@@ -439,8 +445,8 @@ func (app *App) updatePRs(ctx context.Context) {
 			}
 		}
 		if !found {
-			log.Printf("[UPDATE] Incoming PR removed (likely merged/closed): %s #%d - %s",
-				app.incoming[i].Repository, app.incoming[i].Number, app.incoming[i].URL)
+			slog.Info("[UPDATE] Incoming PR removed (likely merged/closed)",
+				"repo", app.incoming[i].Repository, "number", app.incoming[i].Number, "url", app.incoming[i].URL)
 		}
 	}
 	for i := range app.outgoing {
@@ -452,8 +458,8 @@ func (app *App) updatePRs(ctx context.Context) {
 			}
 		}
 		if !found {
-			log.Printf("[UPDATE] Outgoing PR removed (likely merged/closed): %s #%d - %s",
-				app.outgoing[i].Repository, app.outgoing[i].Number, app.outgoing[i].URL)
+			slog.Info("[UPDATE] Outgoing PR removed (likely merged/closed)",
+				"repo", app.outgoing[i].Repository, "number", app.outgoing[i].Number, "url", app.outgoing[i].URL)
 		}
 	}
 
@@ -468,9 +474,9 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.updateMenu(ctx)
 
 	// Process notifications using the simplified state manager
-	log.Print("[DEBUG] Processing PR state updates and notifications")
+	slog.Debug("[DEBUG] Processing PR state updates and notifications")
 	app.updatePRStatesAndNotify(ctx)
-	log.Print("[DEBUG] Completed PR state updates and notifications")
+	slog.Debug("[DEBUG] Completed PR state updates and notifications")
 }
 
 // updateMenu rebuilds the menu only if there are changes to improve UX.
@@ -485,12 +491,12 @@ func (app *App) updateMenu(ctx context.Context) {
 
 	// Check if titles have changed
 	if slices.Equal(currentTitles, lastTitles) {
-		log.Printf("[MENU] No changes detected, skipping rebuild (%d items unchanged)", len(currentTitles))
+		slog.Debug("[MENU] No changes detected, skipping rebuild", "itemCount", len(currentTitles))
 		return
 	}
 
 	// Titles have changed, rebuild menu
-	log.Printf("[MENU] Changes detected, rebuilding menu (%d→%d items)", len(lastTitles), len(currentTitles))
+	slog.Info("[MENU] Changes detected, rebuilding menu", "oldCount", len(lastTitles), "newCount", len(currentTitles))
 	app.rebuildMenu(ctx)
 
 	// Store new titles
@@ -503,7 +509,7 @@ func (app *App) updateMenu(ctx context.Context) {
 func (app *App) updatePRsWithWait(ctx context.Context) {
 	incoming, outgoing, err := app.fetchPRsInternal(ctx)
 	if err != nil {
-		log.Printf("Error fetching PRs: %v", err)
+		slog.Error("Error fetching PRs", "error", err)
 		app.mu.Lock()
 		app.consecutiveFailures++
 		failureCount := app.consecutiveFailures
@@ -567,12 +573,13 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	for i := range outgoing {
 		if outgoing[i].IsBlocked {
 			blockedOutgoing++
-			log.Printf("[DEBUG] Blocked outgoing PR: %s #%d (URL: %s)",
-				outgoing[i].Repository, outgoing[i].Number, outgoing[i].URL)
+			slog.Debug("[DEBUG] Blocked outgoing PR",
+				"repo", outgoing[i].Repository, "number", outgoing[i].Number, "url", outgoing[i].URL)
 		}
 	}
-	log.Printf("[DEBUG] updatePRsInternal: Setting app state with %d incoming (%d blocked), %d outgoing (%d blocked)",
-		len(incoming), blockedIncoming, len(outgoing), blockedOutgoing)
+	slog.Debug("[DEBUG] updatePRsInternal: Setting app state",
+		"incoming", len(incoming), "blockedIncoming", blockedIncoming,
+		"outgoing", len(outgoing), "blockedOutgoing", blockedOutgoing)
 
 	app.mu.Unlock()
 
@@ -594,9 +601,9 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	}
 
 	// Process notifications using the simplified state manager
-	log.Print("[DEBUG] Processing PR state updates and notifications")
+	slog.Debug("[DEBUG] Processing PR state updates and notifications")
 	app.updatePRStatesAndNotify(ctx)
-	log.Print("[DEBUG] Completed PR state updates and notifications")
+	slog.Debug("[DEBUG] Completed PR state updates and notifications")
 	// Mark initial load as complete after first successful update
 	if !app.initialLoadComplete {
 		app.mu.Lock()
@@ -612,20 +619,20 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled boo
 	}
 
 	if app.browserRateLimiter.CanOpen(startTime, pr.URL) {
-		log.Printf("[BROWSER] Auto-opening newly blocked PR: %s #%d - %s",
-			pr.Repository, pr.Number, pr.URL)
+		slog.Info("[BROWSER] Auto-opening newly blocked PR",
+			"repo", pr.Repository, "number", pr.Number, "url", pr.URL)
 		// Use strict validation for auto-opened URLs
 		// Validate against strict GitHub PR URL pattern for auto-opening
 		if err := validateGitHubPRURL(pr.URL); err != nil {
-			log.Printf("Auto-open strict validation failed for %s: %v", sanitizeForLog(pr.URL), err)
+			slog.Warn("Auto-open strict validation failed", "url", sanitizeForLog(pr.URL), "error", err)
 			return
 		}
 		if err := openURL(ctx, pr.URL); err != nil {
-			log.Printf("[BROWSER] Failed to auto-open PR %s: %v", pr.URL, err)
+			slog.Error("[BROWSER] Failed to auto-open PR", "url", pr.URL, "error", err)
 		} else {
 			app.browserRateLimiter.RecordOpen(pr.URL)
-			log.Printf("[BROWSER] Successfully opened PR %s #%d in browser",
-				pr.Repository, pr.Number)
+			slog.Info("[BROWSER] Successfully opened PR in browser",
+				"repo", pr.Repository, "number", pr.Number)
 		}
 	}
 }

@@ -2,7 +2,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -20,8 +20,8 @@ type BrowserRateLimiter struct {
 
 // NewBrowserRateLimiter creates a new browser rate limiter.
 func NewBrowserRateLimiter(startupDelay time.Duration, maxPerMinute, maxPerDay int) *BrowserRateLimiter {
-	log.Printf("[BROWSER] Initializing rate limiter: startup_delay=%v, max_per_minute=%d, max_per_day=%d",
-		startupDelay, maxPerMinute, maxPerDay)
+	slog.Info("[BROWSER] Initializing rate limiter",
+		"startup_delay", startupDelay, "max_per_minute", maxPerMinute, "max_per_day", maxPerDay)
 	return &BrowserRateLimiter{
 		openedLastMinute: make([]time.Time, 0),
 		openedToday:      make([]time.Time, 0),
@@ -39,14 +39,14 @@ func (b *BrowserRateLimiter) CanOpen(startTime time.Time, prURL string) bool {
 
 	// Check if we've already opened this PR
 	if b.openedPRs[prURL] {
-		log.Printf("[BROWSER] Skipping auto-open: PR already opened - %s", prURL)
+		slog.Debug("[BROWSER] Skipping auto-open: PR already opened", "url", prURL)
 		return false
 	}
 
 	// Check startup delay
 	if time.Since(startTime) < b.startupDelay {
-		log.Printf("[BROWSER] Skipping auto-open: within startup delay period (%v remaining)",
-			b.startupDelay-time.Since(startTime))
+		slog.Debug("[BROWSER] Skipping auto-open: within startup delay period",
+			"remaining", b.startupDelay-time.Since(startTime))
 		return false
 	}
 
@@ -57,15 +57,15 @@ func (b *BrowserRateLimiter) CanOpen(startTime time.Time, prURL string) bool {
 
 	// Check per-minute limit
 	if len(b.openedLastMinute) >= b.maxPerMinute {
-		log.Printf("[BROWSER] Rate limit: already opened %d PRs in the last minute (max: %d)",
-			len(b.openedLastMinute), b.maxPerMinute)
+		slog.Debug("[BROWSER] Rate limit: per-minute limit reached",
+			"opened", len(b.openedLastMinute), "max", b.maxPerMinute)
 		return false
 	}
 
 	// Check per-day limit
 	if len(b.openedToday) >= b.maxPerDay {
-		log.Printf("[BROWSER] Rate limit: already opened %d PRs today (max: %d)",
-			len(b.openedToday), b.maxPerDay)
+		slog.Debug("[BROWSER] Rate limit: daily limit reached",
+			"opened", len(b.openedToday), "max", b.maxPerDay)
 		return false
 	}
 
@@ -82,8 +82,9 @@ func (b *BrowserRateLimiter) RecordOpen(prURL string) {
 	b.openedToday = append(b.openedToday, now)
 	b.openedPRs[prURL] = true
 
-	log.Printf("[BROWSER] Recorded browser open for %s (minute: %d/%d, today: %d/%d)",
-		prURL, len(b.openedLastMinute), b.maxPerMinute, len(b.openedToday), b.maxPerDay)
+	slog.Info("[BROWSER] Recorded browser open",
+		"url", prURL, "minuteCount", len(b.openedLastMinute), "minuteMax", b.maxPerMinute,
+		"todayCount", len(b.openedToday), "todayMax", b.maxPerDay)
 }
 
 // cleanOldEntries removes entries outside the time windows.
@@ -115,5 +116,5 @@ func (b *BrowserRateLimiter) Reset() {
 	defer b.mu.Unlock()
 	previousCount := len(b.openedPRs)
 	b.openedPRs = make(map[string]bool)
-	log.Printf("[BROWSER] Rate limiter reset: cleared %d tracked PRs", previousCount)
+	slog.Info("[BROWSER] Rate limiter reset", "clearedPRs", previousCount)
 }

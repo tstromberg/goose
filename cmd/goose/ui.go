@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/url"
 	"os/exec"
 	"runtime"
@@ -58,19 +58,19 @@ func openURL(ctx context.Context, rawURL string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		// Use open command with explicit arguments to prevent injection
-		log.Printf("Executing command: /usr/bin/open -u %q", rawURL)
+		slog.Debug("Executing command", "command", "/usr/bin/open", "url", rawURL)
 		cmd = exec.CommandContext(ctx, "/usr/bin/open", "-u", rawURL)
 	case "windows":
 		// Use rundll32 to open URL safely without cmd shell
-		log.Printf("Executing command: rundll32.exe url.dll,FileProtocolHandler %q", rawURL)
+		slog.Debug("Executing command", "command", "rundll32.exe url.dll,FileProtocolHandler", "url", rawURL)
 		cmd = exec.CommandContext(ctx, "rundll32.exe", "url.dll,FileProtocolHandler", rawURL)
 	case "linux":
 		// Use xdg-open with full path
-		log.Printf("Executing command: /usr/bin/xdg-open %q", rawURL)
+		slog.Debug("Executing command", "command", "/usr/bin/xdg-open", "url", rawURL)
 		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
 	default:
 		// Try xdg-open for other Unix-like systems
-		log.Printf("Executing command: /usr/bin/xdg-open %q", rawURL)
+		slog.Debug("Executing command", "command", "/usr/bin/xdg-open", "url", rawURL)
 		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
 	}
 
@@ -158,8 +158,12 @@ func (app *App) setTrayTitle() {
 	}
 
 	// Log title change with detailed counts
-	log.Printf("[TRAY] Setting title to '%s' (incoming_total=%d, incoming_blocked=%d, outgoing_total=%d, outgoing_blocked=%d)",
-		title, counts.IncomingTotal, counts.IncomingBlocked, counts.OutgoingTotal, counts.OutgoingBlocked)
+	slog.Debug("[TRAY] Setting title",
+		"title", title,
+		"incoming_total", counts.IncomingTotal,
+		"incoming_blocked", counts.IncomingBlocked,
+		"outgoing_total", counts.OutgoingTotal,
+		"outgoing_blocked", counts.OutgoingBlocked)
 	app.systrayInterface.SetTitle(title)
 }
 
@@ -225,12 +229,16 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 				// Use party popper for outgoing PRs, goose for incoming PRs
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
-					log.Printf("[MENU] Adding party popper to outgoing PR: %s (blocked %v ago, %v remaining)",
-						sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration-timeSinceBlocked)
+					slog.Debug("[MENU] Adding party popper to outgoing PR",
+						"url", sortedPRs[prIndex].URL,
+						"blocked_ago", timeSinceBlocked,
+						"remaining", blockedPRIconDuration-timeSinceBlocked)
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
-					log.Printf("[MENU] Adding goose to incoming PR: %s (blocked %v ago, %v remaining)",
-						sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration-timeSinceBlocked)
+					slog.Debug("[MENU] Adding goose to incoming PR",
+						"url", sortedPRs[prIndex].URL,
+						"blocked_ago", timeSinceBlocked,
+						"remaining", blockedPRIconDuration-timeSinceBlocked)
 				}
 			} else {
 				title = fmt.Sprintf("• %s", title)
@@ -238,11 +246,15 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 				if hasState && !prState.FirstBlockedAt.IsZero() {
 					timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 					if sectionTitle == "Outgoing" {
-						log.Printf("[MENU] Removing party popper from outgoing PR: %s (blocked %v ago, exceeded %v duration)",
-							sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration)
+						slog.Debug("[MENU] Removing party popper from outgoing PR",
+							"url", sortedPRs[prIndex].URL,
+							"blocked_ago", timeSinceBlocked,
+							"duration", blockedPRIconDuration)
 					} else {
-						log.Printf("[MENU] Removing goose from incoming PR: %s (blocked %v ago, exceeded %v duration)",
-							sortedPRs[prIndex].URL, timeSinceBlocked, blockedPRIconDuration)
+						slog.Debug("[MENU] Removing goose from incoming PR",
+							"url", sortedPRs[prIndex].URL,
+							"blocked_ago", timeSinceBlocked,
+							"duration", blockedPRIconDuration)
 					}
 				}
 			}
@@ -275,7 +287,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		prURL := sortedPRs[prIndex].URL
 		item.Click(func() {
 			if err := openURL(ctx, prURL); err != nil {
-				log.Printf("failed to open url: %v", err)
+				slog.Error("failed to open url", "error", err)
 			}
 		})
 	}
@@ -407,7 +419,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 		errorMsg := app.systrayInterface.AddMenuItem(app.authError, "Click to see setup instructions")
 		errorMsg.Click(func() {
 			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login"); err != nil {
-				log.Printf("failed to open setup instructions: %v", err)
+				slog.Error("failed to open setup instructions", "error", err)
 			}
 		})
 
@@ -445,7 +457,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	dashboardItem := app.systrayInterface.AddMenuItem("Web Dashboard", "")
 	dashboardItem.Click(func() {
 		if err := openURL(ctx, "https://dash.ready-to-review.dev/"); err != nil {
-			log.Printf("failed to open dashboard: %v", err)
+			slog.Error("failed to open dashboard", "error", err)
 		}
 	})
 
@@ -538,11 +550,11 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 				if app.hiddenOrgs[orgName] {
 					delete(app.hiddenOrgs, orgName)
 					orgItem.Uncheck()
-					log.Printf("[SETTINGS] Unhiding org: %s", orgName)
+					slog.Info("[SETTINGS] Unhiding org", "org", orgName)
 				} else {
 					app.hiddenOrgs[orgName] = true
 					orgItem.Check()
-					log.Printf("[SETTINGS] Hiding org: %s", orgName)
+					slog.Info("[SETTINGS] Hiding org", "org", orgName)
 				}
 				// Menu always rebuilds now - no need to clear titles
 				app.mu.Unlock()
@@ -602,10 +614,10 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 
 		if enabled {
 			audioItem.Check()
-			log.Println("[SETTINGS] Audio cues enabled")
+			slog.Info("[SETTINGS] Audio cues enabled")
 		} else {
 			audioItem.Uncheck()
-			log.Println("[SETTINGS] Audio cues disabled")
+			slog.Info("[SETTINGS] Audio cues disabled")
 		}
 
 		// Save settings to disk
@@ -632,10 +644,10 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 
 		if enabled {
 			autoOpenItem.Check()
-			log.Println("[SETTINGS] Auto-open blocked PRs enabled")
+			slog.Info("[SETTINGS] Auto-open blocked PRs enabled")
 		} else {
 			autoOpenItem.Uncheck()
-			log.Println("[SETTINGS] Auto-open blocked PRs disabled")
+			slog.Info("[SETTINGS] Auto-open blocked PRs disabled")
 		}
 
 		// Save settings to disk
@@ -646,7 +658,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	// Add 'Quit' option
 	quitItem := app.systrayInterface.AddMenuItem("Quit", "")
 	quitItem.Click(func() {
-		log.Println("Quit requested by user")
+		slog.Info("Quit requested by user")
 		app.systrayInterface.Quit()
 	})
 }

@@ -4,7 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/gen2brain/beeep"
@@ -12,7 +12,7 @@ import (
 
 // processNotifications handles notifications for newly blocked PRs using the state manager.
 func (app *App) processNotifications(ctx context.Context) {
-	log.Print("[NOTIFY] Processing notifications...")
+	slog.Debug("[NOTIFY] Processing notifications...")
 
 	// Get the list of PRs that need notifications
 	app.mu.RLock()
@@ -41,11 +41,11 @@ func (app *App) processNotifications(ctx context.Context) {
 	app.mu.Unlock()
 
 	if len(toNotify) == 0 {
-		log.Print("[NOTIFY] No PRs need notifications")
+		slog.Debug("[NOTIFY] No PRs need notifications")
 		return
 	}
 
-	log.Printf("[NOTIFY] %d PRs need notifications", len(toNotify))
+	slog.Info("[NOTIFY] PRs need notifications", "count", len(toNotify))
 
 	// Send notifications for each PR
 	playedHonk := false
@@ -81,7 +81,7 @@ func (app *App) processNotifications(ctx context.Context) {
 
 	// Update menu if we sent notifications
 	if len(toNotify) > 0 {
-		log.Print("[NOTIFY] Updating menu after notifications")
+		slog.Debug("[NOTIFY] Updating menu after notifications")
 		app.updateMenu(ctx)
 	}
 }
@@ -92,12 +92,12 @@ func (app *App) sendPRNotification(ctx context.Context, pr PR, title string, sou
 
 	// Send desktop notification
 	if err := beeep.Notify(title, message, ""); err != nil {
-		log.Printf("[NOTIFY] Failed to send notification for %s: %v", pr.URL, err)
+		slog.Error("[NOTIFY] Failed to send notification", "url", pr.URL, "error", err)
 	}
 
 	// Play sound (only once per type per cycle)
 	if !*playedSound {
-		log.Printf("[NOTIFY] Playing %s sound for PR: %s #%d", soundType, pr.Repository, pr.Number)
+		slog.Debug("[NOTIFY] Playing sound for PR", "soundType", soundType, "repo", pr.Repository, "number", pr.Number)
 		app.playSound(ctx, soundType)
 		*playedSound = true
 	}

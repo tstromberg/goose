@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,21 +65,21 @@ func (*App) token(ctx context.Context) (string, error) {
 		if !githubTokenRegex.MatchString(token) {
 			return "", errors.New("GITHUB_TOKEN has invalid format")
 		}
-		log.Println("Using GitHub token from GITHUB_TOKEN environment variable")
+		slog.Info("Using GitHub token from GITHUB_TOKEN environment variable")
 		return token, nil
 	}
 	// Try to find gh in PATH first
 	ghPath, err := exec.LookPath("gh")
 	if err == nil {
-		log.Printf("Found gh in PATH at: %s", ghPath)
+		slog.Debug("Found gh in PATH", "path", ghPath)
 		// Resolve any symlinks to get the real path
 		if realPath, err := filepath.EvalSymlinks(ghPath); err == nil {
 			ghPath = realPath
-			log.Printf("Resolved to: %s", ghPath)
+			slog.Debug("Resolved gh path", "path", ghPath)
 		}
 	} else {
 		// Fall back to checking common installation paths
-		log.Print("gh not found in PATH, checking common locations...")
+		slog.Debug("gh not found in PATH, checking common locations...")
 		var commonPaths []string
 		switch runtime.GOOS {
 		case "windows":
@@ -126,7 +126,7 @@ func (*App) token(ctx context.Context) (string, error) {
 				continue // Skip empty paths from unset env vars
 			}
 			if _, err := os.Stat(path); err == nil {
-				log.Printf("Found gh at common location: %s", path)
+				slog.Debug("Found gh at common location", "path", path)
 				ghPath = path
 				break
 			}
@@ -137,7 +137,7 @@ func (*App) token(ctx context.Context) (string, error) {
 		return "", errors.New("gh CLI not found in PATH or common locations, and GITHUB_TOKEN not set")
 	}
 
-	log.Printf("Executing command: %s auth token", ghPath)
+	slog.Debug("Executing gh command", "command", ghPath+" auth token")
 
 	// Use retry logic for gh CLI command as it may fail temporarily
 	var token string
@@ -149,7 +149,7 @@ func (*App) token(ctx context.Context) (string, error) {
 		cmd := exec.CommandContext(cmdCtx, ghPath, "auth", "token")
 		output, cmdErr := cmd.CombinedOutput()
 		if cmdErr != nil {
-			log.Printf("gh command failed (will retry): %v", cmdErr)
+			slog.Warn("gh command failed (will retry)", "error", cmdErr)
 			return fmt.Errorf("exec 'gh auth token': %w", cmdErr)
 		}
 
@@ -163,7 +163,7 @@ func (*App) token(ctx context.Context) (string, error) {
 		retry.Attempts(3), // Fewer attempts for local command
 		retry.Delay(time.Second),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("[GH CLI] Retry %d/3: %v", n+1, err)
+			slog.Warn("[GH CLI] Retry attempt", "attempt", n+1, "maxAttempts", 3, "error", err)
 		}),
 		retry.Context(ctx),
 	)
@@ -171,7 +171,7 @@ func (*App) token(ctx context.Context) (string, error) {
 		return "", retryErr
 	}
 
-	log.Println("Successfully obtained GitHub token from gh CLI")
+	slog.Info("Successfully obtained GitHub token from gh CLI")
 	return token, nil
 }
 
@@ -199,23 +199,23 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 				case httpStatusForbidden:
 					if resp.Header.Get("X-Ratelimit-Remaining") == "0" {
 						resetTime := resp.Header.Get("X-Ratelimit-Reset")
-						log.Printf("GitHub API rate limited, reset at: %s (will retry)", resetTime)
+						slog.Warn("GitHub API rate limited (will retry)", "resetTime", resetTime)
 						return retryErr // Retry on rate limit
 					}
-					log.Print("GitHub API access forbidden (check token permissions)")
+					slog.Error("GitHub API access forbidden (check token permissions)")
 					return retry.Unrecoverable(fmt.Errorf("github API access forbidden: %w", retryErr))
 				case httpStatusUnauthorized:
-					log.Print("GitHub API authentication failed (check token)")
+					slog.Error("GitHub API authentication failed (check token)")
 					return retry.Unrecoverable(fmt.Errorf("github API authentication failed: %w", retryErr))
 				case httpStatusUnprocessable:
-					log.Printf("GitHub API query invalid: %s", query)
+					slog.Error("GitHub API query invalid", "query", query)
 					return retry.Unrecoverable(fmt.Errorf("github API query invalid: %w", retryErr))
 				default:
-					log.Printf("GitHub API error (status %d): %v (will retry)", resp.StatusCode, retryErr)
+					slog.Warn("GitHub API error (will retry)", "statusCode", resp.StatusCode, "error", retryErr)
 				}
 			} else {
 				// Likely network error - retry these
-				log.Printf("GitHub API network error: %v (will retry)", retryErr)
+				slog.Warn("GitHub API network error (will retry)", "error", retryErr)
 			}
 			return retryErr
 		}
@@ -225,7 +225,7 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
 		retry.MaxDelay(maxRetryDelay),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("[GITHUB] Search.Issues retry %d/%d: %v", n+1, maxRetries, err)
+			slog.Warn("[GITHUB] Search.Issues retry", "attempt", n+1, "maxRetries", maxRetries, "error", err)
 		}),
 		retry.Context(ctx),
 	)
@@ -289,7 +289,7 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 	// Query 1: PRs involving the user
 	go func() {
 		query := fmt.Sprintf("is:open is:pr involves:%s archived:false", user)
-		log.Printf("[GITHUB] Searching for PRs with query: %s", query)
+		slog.Debug("[GITHUB] Searching for PRs", "query", query)
 
 		result, err := app.executeGitHubQuery(ctx, query, opts)
 		if err != nil {
@@ -302,7 +302,7 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 	// Query 2: PRs in user-owned repos with no reviewers
 	go func() {
 		query := fmt.Sprintf("is:open is:pr user:%s review:none archived:false", user)
-		log.Printf("[GITHUB] Searching for PRs with query: %s", query)
+		slog.Debug("[GITHUB] Searching for PRs", "query", query)
 
 		result, err := app.executeGitHubQuery(ctx, query, opts)
 		if err != nil {
@@ -320,12 +320,12 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 	for range 2 {
 		result := <-queryResults
 		if result.err != nil {
-			log.Printf("[GITHUB] Query failed: %s - %v", result.query, result.err)
+			slog.Error("[GITHUB] Query failed", "query", result.query, "error", result.err)
 			queryErrors = append(queryErrors, result.err)
 			// Continue processing other query results even if one fails
 			continue
 		}
-		log.Printf("[GITHUB] Query completed: %s - found %d PRs", result.query, len(result.issues))
+		slog.Debug("[GITHUB] Query completed", "query", result.query, "prCount", len(result.issues))
 
 		// Deduplicate PRs based on URL
 		for _, issue := range result.issues {
@@ -336,7 +336,7 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 			}
 		}
 	}
-	log.Printf("[GITHUB] Both searches completed in %v, found %d unique PRs", time.Since(searchStart), len(allIssues))
+	slog.Info("[GITHUB] Both searches completed", "duration", time.Since(searchStart), "uniquePRs", len(allIssues))
 
 	// If both queries failed, return an error
 	if len(queryErrors) == 2 {
@@ -345,7 +345,7 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 
 	// Limit PRs for performance
 	if len(allIssues) > maxPRsToProcess {
-		log.Printf("Limiting to %d PRs for performance (total: %d)", maxPRsToProcess, len(allIssues))
+		slog.Info("Limiting PRs for performance", "limit", maxPRsToProcess, "total", len(allIssues))
 		allIssues = allIssues[:maxPRsToProcess]
 	}
 
@@ -361,7 +361,7 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 		if org != "" {
 			app.mu.Lock()
 			if !app.seenOrgs[org] {
-				log.Printf("[ORG] Discovered new organization: %s", org)
+				slog.Info("[ORG] Discovered new organization", "org", org)
 			}
 			app.seenOrgs[org] = true
 			app.mu.Unlock()
@@ -385,7 +385,7 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 	}
 
 	// Only log summary, not individual PRs
-	log.Printf("[GITHUB] Found %d incoming, %d outgoing PRs from GitHub", len(incoming), len(outgoing))
+	slog.Info("[GITHUB] GitHub PR summary", "incoming", len(incoming), "outgoing", len(outgoing))
 
 	// Fetch Turn API data
 	// Always synchronous now for simplicity - Turn API calls are fast with caching
@@ -459,7 +459,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 				actionReason = action.Reason
 				// Only log fresh API calls
 				if !result.wasFromCache {
-					log.Printf("[TURN] UnblockAction for %s: Reason=%q, Kind=%q", result.url, action.Reason, action.Kind)
+					slog.Debug("[TURN] UnblockAction", "url", result.url, "reason", action.Reason, "kind", action.Kind)
 				}
 			}
 
@@ -487,6 +487,6 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 		}
 	}
 
-	log.Printf("[TURN] Turn API queries completed in %v (%d/%d succeeded)",
-		time.Since(turnStart), turnSuccesses, turnSuccesses+turnFailures)
+	slog.Info("[TURN] Turn API queries completed",
+		"duration", time.Since(turnStart), "succeeded", turnSuccesses, "total", turnSuccesses+turnFailures)
 }

@@ -3,7 +3,7 @@ package main
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 )
@@ -29,7 +29,7 @@ func settingsDir() (string, error) {
 func (app *App) loadSettings() {
 	settingsDir, err := settingsDir()
 	if err != nil {
-		log.Printf("Failed to get settings directory: %v", err)
+		slog.Error("Failed to get settings directory", "error", err)
 		// Use defaults
 		app.enableAudioCues = true
 		app.hideStaleIncoming = true
@@ -43,7 +43,7 @@ func (app *App) loadSettings() {
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("Failed to read settings: %v", err)
+			slog.Debug("Failed to read settings", "error", err)
 		}
 		// Use defaults
 		app.enableAudioCues = true
@@ -55,7 +55,7 @@ func (app *App) loadSettings() {
 
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {
-		log.Printf("Failed to parse settings: %v", err)
+		slog.Error("Failed to parse settings", "error", err)
 		// Use defaults
 		app.enableAudioCues = true
 		app.hideStaleIncoming = true
@@ -72,15 +72,18 @@ func (app *App) loadSettings() {
 	} else {
 		app.hiddenOrgs = make(map[string]bool)
 	}
-	log.Printf("Loaded settings: audio_cues=%v, hide_stale=%v, auto_browser=%v, hidden_orgs=%d",
-		app.enableAudioCues, app.hideStaleIncoming, app.enableAutoBrowser, len(app.hiddenOrgs))
+	slog.Info("Loaded settings",
+		"audio_cues", app.enableAudioCues,
+		"hide_stale", app.hideStaleIncoming,
+		"auto_browser", app.enableAutoBrowser,
+		"hidden_orgs", len(app.hiddenOrgs))
 }
 
 // saveSettings saves current settings to disk.
 func (app *App) saveSettings() {
 	settingsDir, err := settingsDir()
 	if err != nil {
-		log.Printf("Failed to get settings directory: %v", err)
+		slog.Error("Failed to get settings directory", "error", err)
 		return
 	}
 
@@ -95,7 +98,7 @@ func (app *App) saveSettings() {
 
 	// Ensure directory exists
 	if err := os.MkdirAll(settingsDir, 0o700); err != nil {
-		log.Printf("Failed to create settings directory: %v", err)
+		slog.Error("Failed to create settings directory", "error", err)
 		return
 	}
 
@@ -103,15 +106,18 @@ func (app *App) saveSettings() {
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		log.Printf("Failed to marshal settings: %v", err)
+		slog.Error("Failed to marshal settings", "error", err)
 		return
 	}
 
 	if err := os.WriteFile(settingsPath, data, 0o600); err != nil {
-		log.Printf("Failed to save settings: %v", err)
+		slog.Error("Failed to save settings", "error", err)
 		return
 	}
 
-	log.Printf("Saved settings: audio_cues=%v, hide_stale=%v, auto_browser=%v, hidden_orgs=%d",
-		settings.EnableAudioCues, settings.HideStale, settings.EnableAutoBrowser, len(settings.HiddenOrgs))
+	slog.Info("Saved settings",
+		"audio_cues", settings.EnableAudioCues,
+		"hide_stale", settings.HideStale,
+		"auto_browser", settings.EnableAutoBrowser,
+		"hidden_orgs", len(settings.HiddenOrgs))
 }

@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,10 +41,10 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		if data, readErr := os.ReadFile(cacheFile); readErr == nil {
 			var entry cacheEntry
 			if unmarshalErr := json.Unmarshal(data, &entry); unmarshalErr != nil {
-				log.Printf("Failed to unmarshal cache data for %s: %v", url, unmarshalErr)
+				slog.Warn("Failed to unmarshal cache data", "url", url, "error", unmarshalErr)
 				// Remove corrupted cache file
 				if removeErr := os.Remove(cacheFile); removeErr != nil {
-					log.Printf("Failed to remove corrupted cache file: %v", removeErr)
+					slog.Error("Failed to remove corrupted cache file", "error", removeErr)
 				}
 			} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
 				// Check if cache is still valid (2 hour TTL)
@@ -55,9 +55,9 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 
 	// Cache miss, fetch from API
 	if app.noCache {
-		log.Printf("Cache bypassed for %s (--no-cache), fetching from Turn API", url)
+		slog.Debug("Cache bypassed (--no-cache), fetching from Turn API", "url", url)
 	} else {
-		log.Printf("Cache miss for %s, fetching from Turn API", url)
+		slog.Debug("Cache miss, fetching from Turn API", "url", url)
 	}
 
 	// Use exponential backoff with jitter for Turn API calls
@@ -70,7 +70,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		var retryErr error
 		data, retryErr = app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), updatedAt)
 		if retryErr != nil {
-			log.Printf("Turn API error (will retry): %v", retryErr)
+			slog.Warn("Turn API error (will retry)", "error", retryErr)
 			return retryErr
 		}
 		return nil
@@ -79,12 +79,12 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
 		retry.MaxDelay(maxRetryDelay),
 		retry.OnRetry(func(n uint, err error) {
-			log.Printf("[TURN] API retry %d/%d for %s: %v", n+1, maxRetries, url, err)
+			slog.Warn("[TURN] API retry", "attempt", n+1, "maxRetries", maxRetries, "url", url, "error", err)
 		}),
 		retry.Context(ctx),
 	)
 	if err != nil {
-		log.Printf("Turn API error after %d retries (will use PR without metadata): %v", maxRetries, err)
+		slog.Error("Turn API error after retries (will use PR without metadata)", "maxRetries", maxRetries, "error", err)
 		return nil, false, err
 	}
 
@@ -96,13 +96,13 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 			UpdatedAt: updatedAt,
 		}
 		if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
-			log.Printf("Failed to marshal cache data for %s: %v", url, marshalErr)
+			slog.Error("Failed to marshal cache data", "url", url, "error", marshalErr)
 		} else {
 			// Ensure cache directory exists with secure permissions
 			if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
-				log.Printf("Failed to create cache directory: %v", dirErr)
+				slog.Error("Failed to create cache directory", "error", dirErr)
 			} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
-				log.Printf("Failed to write cache file: %v", writeErr)
+				slog.Error("Failed to write cache file", "error", writeErr)
 			}
 		}
 	}
@@ -114,7 +114,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 func (app *App) cleanupOldCache() {
 	entries, err := os.ReadDir(app.cacheDir)
 	if err != nil {
-		log.Printf("Failed to read cache directory for cleanup: %v", err)
+		slog.Error("Failed to read cache directory for cleanup", "error", err)
 		return
 	}
 
@@ -126,7 +126,7 @@ func (app *App) cleanupOldCache() {
 
 		info, err := entry.Info()
 		if err != nil {
-			log.Printf("Failed to get file info for cache entry %s: %v", entry.Name(), err)
+			slog.Error("Failed to get file info for cache entry", "entry", entry.Name(), "error", err)
 			errorCount++
 			continue
 		}
@@ -135,7 +135,7 @@ func (app *App) cleanupOldCache() {
 		if time.Since(info.ModTime()) > cacheCleanupInterval {
 			filePath := filepath.Join(app.cacheDir, entry.Name())
 			if removeErr := os.Remove(filePath); removeErr != nil {
-				log.Printf("Failed to remove old cache file %s: %v", filePath, removeErr)
+				slog.Error("Failed to remove old cache file", "file", filePath, "error", removeErr)
 				errorCount++
 			} else {
 				cleanupCount++
@@ -144,6 +144,6 @@ func (app *App) cleanupOldCache() {
 	}
 
 	if cleanupCount > 0 || errorCount > 0 {
-		log.Printf("Cache cleanup completed: %d files removed, %d errors", cleanupCount, errorCount)
+		slog.Info("Cache cleanup completed", "removed", cleanupCount, "errors", errorCount)
 	}
 }

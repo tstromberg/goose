@@ -4,7 +4,7 @@ package main
 import (
 	"context"
 	_ "embed"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +28,7 @@ func (app *App) initSoundCache() {
 		// Create sounds subdirectory in cache
 		soundDir := filepath.Join(app.cacheDir, "sounds")
 		if err := os.MkdirAll(soundDir, 0o700); err != nil {
-			log.Printf("Failed to create sound cache dir: %v", err)
+			slog.Error("Failed to create sound cache dir", "error", err)
 			return
 		}
 
@@ -36,7 +36,7 @@ func (app *App) initSoundCache() {
 		jetPath := filepath.Join(soundDir, "jet.wav")
 		if _, err := os.Stat(jetPath); os.IsNotExist(err) {
 			if err := os.WriteFile(jetPath, jetSound, 0o600); err != nil {
-				log.Printf("Failed to cache jet sound: %v", err)
+				slog.Error("Failed to cache jet sound", "error", err)
 			}
 		}
 
@@ -44,7 +44,7 @@ func (app *App) initSoundCache() {
 		honkPath := filepath.Join(soundDir, "honk.wav")
 		if _, err := os.Stat(honkPath); os.IsNotExist(err) {
 			if err := os.WriteFile(honkPath, honkSound, 0o600); err != nil {
-				log.Printf("Failed to cache honk sound: %v", err)
+				slog.Error("Failed to cache honk sound", "error", err)
 			}
 		}
 	})
@@ -58,11 +58,11 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 	app.mu.RUnlock()
 
 	if !audioEnabled {
-		log.Printf("[SOUND] Sound playback skipped (audio cues disabled): %s", soundType)
+		slog.Debug("[SOUND] Sound playback skipped (audio cues disabled)", "soundType", soundType)
 		return
 	}
 
-	log.Printf("[SOUND] Playing %s sound", soundType)
+	slog.Debug("[SOUND] Playing sound", "soundType", soundType)
 	// Ensure sounds are cached
 	app.initSoundCache()
 
@@ -74,13 +74,13 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 
 	soundName, ok := allowedSounds[soundType]
 	if !ok {
-		log.Printf("Invalid sound type requested: %s", soundType)
+		slog.Error("Invalid sound type requested", "soundType", soundType)
 		return
 	}
 
 	// Double-check the sound name contains no path separators
 	if strings.Contains(soundName, "/") || strings.Contains(soundName, "\\") || strings.Contains(soundName, "..") {
-		log.Printf("Sound name contains invalid characters: %s", soundName)
+		slog.Error("Sound name contains invalid characters", "soundName", soundName)
 		return
 	}
 
@@ -88,13 +88,13 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 
 	// Check if file exists
 	if _, err := os.Stat(soundPath); os.IsNotExist(err) {
-		log.Printf("Sound file not found in cache: %s", soundPath)
+		slog.Error("Sound file not found in cache", "soundPath", soundPath)
 		return
 	}
 
 	// Check if we're in test mode (environment variable set by tests)
 	if os.Getenv("GOOSE_TEST_MODE") == "1" {
-		log.Printf("[SOUND] Test mode - skipping actual sound playback of %s", soundPath)
+		slog.Debug("[SOUND] Test mode - skipping actual sound playback", "soundPath", soundPath)
 		return
 	}
 
@@ -124,7 +124,7 @@ func (app *App) playSound(ctx context.Context, soundType string) {
 
 		if cmd != nil {
 			if err := cmd.Run(); err != nil {
-				log.Printf("Failed to play sound: %v", err)
+				slog.Error("Failed to play sound", "error", err)
 			}
 		}
 	}()
