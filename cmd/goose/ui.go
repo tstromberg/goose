@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/energye/systray" // needed for MenuItem type
@@ -407,8 +408,15 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Clear all existing menu items
 	app.systrayInterface.ResetMenu()
 
-	// Check for auth error first
-	if app.authError != "" {
+	// Check for errors (auth or connection failures)
+	app.mu.RLock()
+	authError := app.authError
+	failureCount := app.consecutiveFailures
+	lastFetchError := app.lastFetchError
+	app.mu.RUnlock()
+
+	// Show auth error if present
+	if authError != "" {
 		// Show authentication error message
 		errorTitle := app.systrayInterface.AddMenuItem("⚠️ Authentication Error", "")
 		errorTitle.Disable()
@@ -416,7 +424,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 		app.systrayInterface.AddSeparator()
 
 		// Add error details
-		errorMsg := app.systrayInterface.AddMenuItem(app.authError, "Click to see setup instructions")
+		errorMsg := app.systrayInterface.AddMenuItem(authError, "Click to see setup instructions")
 		errorMsg.Click(func() {
 			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login"); err != nil {
 				slog.Error("failed to open setup instructions", "error", err)
@@ -447,6 +455,78 @@ func (app *App) rebuildMenu(ctx context.Context) {
 		})
 
 		return
+	}
+
+	// Show connection error if we have consecutive failures
+	if failureCount > 0 && lastFetchError != "" {
+		var errorMsg string
+		switch {
+		case failureCount == 1:
+			errorMsg = "⚠️ Connection Error"
+		case failureCount <= 3:
+			errorMsg = fmt.Sprintf("⚠️ Connection Issues (%d failures)", failureCount)
+		case failureCount <= 10:
+			errorMsg = "❌ Multiple Connection Failures"
+		default:
+			errorMsg = "💀 Service Degraded"
+		}
+
+		errorTitle := app.systrayInterface.AddMenuItem(errorMsg, "")
+		errorTitle.Disable()
+
+		// Determine hostname and error type
+		hostname := "api.github.com"
+		for _, h := range []struct{ match, host string }{
+			{"ready-to-review.dev", "dash.ready-to-review.dev"},
+			{"api.github.com", "api.github.com"},
+			{"github.com", "github.com"},
+		} {
+			if strings.Contains(lastFetchError, h.match) {
+				hostname = h.host
+				break
+			}
+		}
+
+		errorType := "Connection failed"
+		for _, e := range []struct{ match, errType string }{
+			{"timeout", "Request timeout"},
+			{"context deadline", "Request timeout (context deadline)"},
+			{"rate limit", "Rate limit exceeded"},
+			{"401", "Authentication failed"},
+			{"unauthorized", "Authentication failed"},
+			{"403", "Access forbidden"},
+			{"forbidden", "Access forbidden"},
+			{"404", "Resource not found"},
+			{"connection refused", "Connection refused"},
+			{"no such host", "DNS resolution failed"},
+			{"TLS", "TLS/Certificate error"},
+			{"x509", "TLS/Certificate error"},
+		} {
+			if strings.Contains(lastFetchError, e.match) {
+				errorType = e.errType
+				break
+			}
+		}
+
+		// Show technical details
+		techDetails := app.systrayInterface.AddMenuItem(fmt.Sprintf("Host: %s", hostname), "")
+		techDetails.Disable()
+
+		errorTypeItem := app.systrayInterface.AddMenuItem(fmt.Sprintf("Error: %s", errorType), "")
+		errorTypeItem.Disable()
+
+		// Show truncated raw error for debugging (max 80 chars)
+		rawError := lastFetchError
+		if len(rawError) > 80 {
+			rawError = rawError[:77] + "..."
+		}
+		rawErrorItem := app.systrayInterface.AddMenuItem(fmt.Sprintf("Details: %s", rawError), "Click to copy full error")
+		rawErrorItem.Click(func() {
+			// Would need clipboard support to implement copy
+			slog.Info("Full error", "error", lastFetchError)
+		})
+
+		app.systrayInterface.AddSeparator()
 	}
 
 	// Update tray title

@@ -16,62 +16,43 @@ type Settings struct {
 	EnableAutoBrowser bool            `json:"enable_auto_browser"`
 }
 
-// settingsDir returns the configuration directory for settings.
-func settingsDir() (string, error) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(configDir, "review-goose"), nil
-}
-
 // loadSettings loads settings from disk or returns defaults.
 func (app *App) loadSettings() {
-	settingsDir, err := settingsDir()
+	// Set defaults first
+	app.enableAudioCues = true
+	app.hideStaleIncoming = true
+	app.enableAutoBrowser = false
+	app.hiddenOrgs = make(map[string]bool)
+
+	configDir, err := os.UserConfigDir()
 	if err != nil {
 		slog.Error("Failed to get settings directory", "error", err)
-		// Use defaults
-		app.enableAudioCues = true
-		app.hideStaleIncoming = true
-		app.enableAutoBrowser = false
-		app.hiddenOrgs = make(map[string]bool)
 		return
 	}
 
-	settingsPath := filepath.Join(settingsDir, "settings.json")
-
+	settingsPath := filepath.Join(configDir, "review-goose", "settings.json")
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Debug("Failed to read settings", "error", err)
 		}
-		// Use defaults
-		app.enableAudioCues = true
-		app.hideStaleIncoming = true
-		app.enableAutoBrowser = false
-		app.hiddenOrgs = make(map[string]bool)
 		return
 	}
 
 	var settings Settings
 	if err := json.Unmarshal(data, &settings); err != nil {
 		slog.Error("Failed to parse settings", "error", err)
-		// Use defaults
-		app.enableAudioCues = true
-		app.hideStaleIncoming = true
-		app.enableAutoBrowser = false
-		app.hiddenOrgs = make(map[string]bool)
 		return
 	}
 
+	// Override defaults with loaded values
 	app.enableAudioCues = settings.EnableAudioCues
 	app.hideStaleIncoming = settings.HideStale
 	app.enableAutoBrowser = settings.EnableAutoBrowser
 	if settings.HiddenOrgs != nil {
 		app.hiddenOrgs = settings.HiddenOrgs
-	} else {
-		app.hiddenOrgs = make(map[string]bool)
 	}
+
 	slog.Info("Loaded settings",
 		"audio_cues", app.enableAudioCues,
 		"hide_stale", app.hideStaleIncoming,
@@ -81,11 +62,12 @@ func (app *App) loadSettings() {
 
 // saveSettings saves current settings to disk.
 func (app *App) saveSettings() {
-	settingsDir, err := settingsDir()
+	configDir, err := os.UserConfigDir()
 	if err != nil {
 		slog.Error("Failed to get settings directory", "error", err)
 		return
 	}
+	settingsDir := filepath.Join(configDir, "review-goose")
 
 	app.mu.RLock()
 	settings := Settings{

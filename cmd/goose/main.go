@@ -78,6 +78,7 @@ type App struct {
 	turnClient          *turn.Client
 	previousBlockedPRs  map[string]bool
 	authError           string
+	lastFetchError      string
 	cacheDir            string
 	targetUser          string
 	lastMenuTitles      []string
@@ -206,6 +207,30 @@ func main() {
 	if err := os.MkdirAll(cacheDir, dirPerm); err != nil {
 		slog.Error("Failed to create cache directory", "error", err)
 		os.Exit(1)
+	}
+
+	// Set up file-based logging alongside cache
+	logDir := filepath.Join(cacheDir, "logs")
+	if err := os.MkdirAll(logDir, dirPerm); err != nil {
+		slog.Error("Failed to create log directory", "error", err)
+		// Continue without file logging
+	} else {
+		// Create log file with daily rotation
+		logPath := filepath.Join(logDir, fmt.Sprintf("goose-%s.log", time.Now().Format("2006-01-02")))
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			slog.Error("Failed to open log file", "error", err)
+		} else {
+			// Update logger to write to both stderr and file
+			multiHandler := &MultiHandler{
+				handlers: []slog.Handler{
+					slog.NewTextHandler(os.Stderr, opts),
+					slog.NewTextHandler(logFile, opts),
+				},
+			}
+			slog.SetDefault(slog.New(multiHandler))
+			slog.Info("Logs are being written to", "path", logPath)
+		}
 	}
 
 	startTime := time.Now()
@@ -376,6 +401,7 @@ func (app *App) updatePRs(ctx context.Context) {
 		app.mu.Lock()
 		app.consecutiveFailures++
 		failureCount := app.consecutiveFailures
+		app.lastFetchError = err.Error()
 		app.mu.Unlock()
 
 		// Progressive degradation based on failure count
@@ -431,6 +457,7 @@ func (app *App) updatePRs(ctx context.Context) {
 	app.mu.Lock()
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
+	app.lastFetchError = ""
 	app.mu.Unlock()
 
 	// Update state atomically
@@ -513,6 +540,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.mu.Lock()
 		app.consecutiveFailures++
 		failureCount := app.consecutiveFailures
+		app.lastFetchError = err.Error()
 		app.mu.Unlock()
 
 		// Progressive degradation based on failure count
@@ -535,7 +563,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		systray.SetTitle(title)
 		systray.SetTooltip(tooltip)
 
-		// Still create initial menu even on error
+		// Create or update menu to show error state
 		if !app.menuInitialized {
 			// Create initial menu despite error
 			app.rebuildMenu(ctx)
@@ -547,6 +575,9 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 			app.lastMenuTitles = menuTitles
 			app.mu.Unlock()
 			// Menu initialization complete
+		} else if failureCount == 1 {
+			// On first failure, rebuild menu to show error at top
+			app.rebuildMenu(ctx)
 		}
 		return
 	}
@@ -555,6 +586,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	app.mu.Lock()
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
+	app.lastFetchError = ""
 	app.mu.Unlock()
 
 	// Update state

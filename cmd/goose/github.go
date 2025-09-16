@@ -446,10 +446,17 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 	// Collect results and update PRs directly
 	turnSuccesses := 0
 	turnFailures := 0
+	actualAPICalls := 0
+	cacheHits := 0
 
 	for result := range results {
 		if result.err == nil && result.turnData != nil && result.turnData.PRState.UnblockAction != nil {
 			turnSuccesses++
+			if result.wasFromCache {
+				cacheHits++
+			} else {
+				actualAPICalls++
+			}
 
 			// Check if user needs to review and get action reason
 			needsReview := false
@@ -487,6 +494,17 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 		}
 	}
 
-	slog.Info("[TURN] Turn API queries completed",
-		"duration", time.Since(turnStart), "succeeded", turnSuccesses, "total", turnSuccesses+turnFailures)
+	// Only log if there were actual API calls or failures
+	if actualAPICalls > 0 || turnFailures > 0 {
+		slog.Info("[TURN] API queries completed",
+			"duration", time.Since(turnStart),
+			"api_calls", actualAPICalls,
+			"cache_hits", cacheHits,
+			"failures", turnFailures,
+			"total", turnSuccesses+turnFailures)
+	} else if cacheHits > 0 {
+		slog.Debug("[TURN] All data served from cache",
+			"cache_hits", cacheHits,
+			"duration", time.Since(turnStart))
+	}
 }
