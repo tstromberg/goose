@@ -455,10 +455,18 @@ func (app *App) updatePRs(ctx context.Context) {
 
 	// Update health status on success
 	app.mu.Lock()
+	previousFailures := app.consecutiveFailures
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
 	app.lastFetchError = ""
 	app.mu.Unlock()
+
+	// Restore normal tray icon after successful fetch
+	if previousFailures > 0 {
+		slog.Info("[RECOVERY] Network recovered, restoring tray icon",
+			"previousFailures", previousFailures)
+	}
+	app.setTrayTitle()
 
 	// Update state atomically
 	app.mu.Lock()
@@ -584,10 +592,18 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 
 	// Update health status on success
 	app.mu.Lock()
+	previousFailures := app.consecutiveFailures
 	app.lastSuccessfulFetch = time.Now()
 	app.consecutiveFailures = 0
 	app.lastFetchError = ""
 	app.mu.Unlock()
+
+	// Restore normal tray icon after successful fetch
+	if previousFailures > 0 {
+		slog.Info("[RECOVERY] Network recovered, restoring tray icon",
+			"previousFailures", previousFailures)
+	}
+	app.setTrayTitle()
 
 	// Update state
 	app.mu.Lock()
