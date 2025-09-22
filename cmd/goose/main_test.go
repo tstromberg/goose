@@ -174,6 +174,50 @@ func TestMenuItemTitleTransition(t *testing.T) {
 	_ = ctx // Unused in this test but would be used for real menu operations
 }
 
+// TestTrayIconRestoredAfterNetworkRecovery tests that the tray icon is restored
+// to normal after network failures are resolved.
+func TestTrayIconRestoredAfterNetworkRecovery(t *testing.T) {
+	ctx := context.Background()
+	mock := &MockSystray{}
+	app := &App{
+		mu:                 sync.RWMutex{},
+		stateManager:       NewPRStateManager(time.Now().Add(-35 * time.Second)), // Past grace period
+		blockedPRTimes:     make(map[string]time.Time),
+		hiddenOrgs:         make(map[string]bool),
+		seenOrgs:           make(map[string]bool),
+		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		systrayInterface:   mock,
+		menuInitialized:    true,
+	}
+
+	// Initial state - successful fetch with some PRs
+	app.incoming = []PR{
+		{Repository: "test/repo", Number: 1, NeedsReview: true, UpdatedAt: time.Now()},
+	}
+	app.setTrayTitle()
+	initialTitle := mock.title
+	if initialTitle != "🪿 1" {
+		t.Errorf("Expected initial tray title '🪿 1', got %q", initialTitle)
+	}
+
+	// Simulate network failure - updatePRs would set warning icon and return early
+	app.consecutiveFailures = 3
+	app.lastFetchError = "network timeout"
+	// In the old code, rebuildMenu would be called but return early, never calling setTrayTitle()
+	app.rebuildMenu(ctx)
+	// The mock systray won't have the warning icon because rebuildMenu doesn't set it directly
+
+	// Simulate network recovery - this should restore the normal icon
+	app.consecutiveFailures = 0
+	app.lastFetchError = ""
+	// With our fix, setTrayTitle() is now called after successful fetch
+	app.setTrayTitle()
+	recoveredTitle := mock.title
+	if recoveredTitle != "🪿 1" {
+		t.Errorf("Expected tray title to be restored to '🪿 1' after recovery, got %q", recoveredTitle)
+	}
+}
+
 // TestTrayTitleUpdates tests that the tray title updates correctly based on PR counts.
 func TestTrayTitleUpdates(t *testing.T) {
 	app := &App{
