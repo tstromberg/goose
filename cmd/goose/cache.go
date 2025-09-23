@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
-	"github.com/ready-to-review/turnclient/pkg/turn"
+	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 )
 
 type cacheEntry struct {
