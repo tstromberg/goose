@@ -57,6 +57,7 @@ type PR struct {
 	URL               string
 	Repository        string
 	ActionReason      string
+	ActionKind        string // The kind of action expected (review, merge, fix_tests, etc.)
 	Number            int
 	IsBlocked         bool
 	NeedsReview       bool
@@ -675,12 +676,12 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled boo
 			slog.Warn("Auto-open strict validation failed", "url", sanitizeForLog(pr.URL), "error", err)
 			return
 		}
-		if err := openURL(ctx, pr.URL); err != nil {
+		if err := openURL(ctx, pr.URL, pr.ActionKind); err != nil {
 			slog.Error("[BROWSER] Failed to auto-open PR", "url", pr.URL, "error", err)
 		} else {
 			app.browserRateLimiter.RecordOpen(pr.URL)
 			slog.Info("[BROWSER] Successfully opened PR in browser",
-				"repo", pr.Repository, "number", pr.Number)
+				"repo", pr.Repository, "number", pr.Number, "action", pr.ActionKind)
 		}
 	}
 }

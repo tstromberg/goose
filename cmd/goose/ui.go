@@ -20,7 +20,8 @@ import (
 var _ *systray.MenuItem = nil
 
 // openURL safely opens a URL in the default browser after validation.
-func openURL(ctx context.Context, rawURL string) error {
+// action parameter is optional and specifies the expected action type for tracking.
+func openURL(ctx context.Context, rawURL string, action string) error {
 	// Parse and validate the URL
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -45,10 +46,15 @@ func openURL(ctx context.Context, rawURL string) error {
 		return errors.New("URLs with user info are not allowed")
 	}
 
-	// Add goose=1 parameter to track source for GitHub and dash URLs
+	// Add goose parameter to track source and action for GitHub and dash URLs
 	if u.Host == "github.com" || u.Host == "www.github.com" || u.Host == "dash.ready-to-review.dev" {
 		q := u.Query()
-		q.Set("goose", "1")
+		// Use action if provided, otherwise default to "1" for backward compatibility
+		if action != "" {
+			q.Set("goose", action)
+		} else {
+			q.Set("goose", "1")
+		}
 		u.RawQuery = q.Encode()
 		rawURL = u.String()
 	}
@@ -284,10 +290,11 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		// Create PR menu item
 		item := app.systrayInterface.AddMenuItem(title, tooltip)
 
-		// Capture URL to avoid loop variable capture bug
+		// Capture URL and action to avoid loop variable capture bug
 		prURL := sortedPRs[prIndex].URL
+		prAction := sortedPRs[prIndex].ActionKind
 		item.Click(func() {
-			if err := openURL(ctx, prURL); err != nil {
+			if err := openURL(ctx, prURL, prAction); err != nil {
 				slog.Error("failed to open url", "error", err)
 			}
 		})
@@ -426,7 +433,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 		// Add error details
 		errorMsg := app.systrayInterface.AddMenuItem(authError, "Click to see setup instructions")
 		errorMsg.Click(func() {
-			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login"); err != nil {
+			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login", ""); err != nil {
 				slog.Error("failed to open setup instructions", "error", err)
 			}
 		})
@@ -536,7 +543,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Add Web Dashboard link
 	dashboardItem := app.systrayInterface.AddMenuItem("Web Dashboard", "")
 	dashboardItem.Click(func() {
-		if err := openURL(ctx, "https://dash.ready-to-review.dev/"); err != nil {
+		if err := openURL(ctx, "https://dash.ready-to-review.dev/", ""); err != nil {
 			slog.Error("failed to open dashboard", "error", err)
 		}
 	})

@@ -22,6 +22,26 @@ func TestValidateGitHubPRURL(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:    "valid PR URL with goose=review param",
+			url:     "https://github.com/owner/repo/pull/123?goose=review",
+			wantErr: false,
+		},
+		{
+			name:    "valid PR URL with goose=merge param",
+			url:     "https://github.com/owner/repo/pull/123?goose=merge",
+			wantErr: false,
+		},
+		{
+			name:    "valid PR URL with goose=fix_tests param",
+			url:     "https://github.com/owner/repo/pull/123?goose=fix_tests",
+			wantErr: false,
+		},
+		{
+			name:    "valid PR URL with goose=resolve_comments param",
+			url:     "https://github.com/owner/repo/pull/123?goose=resolve_comments",
+			wantErr: false,
+		},
+		{
 			name:    "valid PR URL with hyphen in owner",
 			url:     "https://github.com/owner-name/repo/pull/1",
 			wantErr: false,
@@ -65,6 +85,11 @@ func TestValidateGitHubPRURL(t *testing.T) {
 		},
 
 		// Invalid URLs - wrong format
+		{
+			name:    "URL with multiple query parameters",
+			url:     "https://github.com/owner/repo/pull/123?goose=review&other=param",
+			wantErr: true,
+		},
 		{
 			name:    "not a PR URL",
 			url:     "https://github.com/owner/repo",

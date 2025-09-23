@@ -124,17 +124,17 @@ func validateURL(rawURL string) error {
 // validateGitHubPRURL performs strict validation for GitHub PR URLs used in auto-opening.
 // This ensures the URL follows the exact pattern: https://github.com/{owner}/{repo}/pull/{number}
 // with no additional path segments, fragments, or suspicious characters.
-// The URL may optionally have ?goose=1 parameter which we add for tracking.
+// The URL may optionally have ?goose=<action> parameter which we add for tracking.
 func validateGitHubPRURL(rawURL string) error {
 	// First do basic URL validation
 	if err := validateURL(rawURL); err != nil {
 		return err
 	}
 
-	// Strip the ?goose=1 parameter if present for pattern validation
+	// Strip the ?goose parameter if present for pattern validation
 	urlToValidate := rawURL
-	if strings.HasSuffix(rawURL, "?goose=1") {
-		urlToValidate = strings.TrimSuffix(rawURL, "?goose=1")
+	if idx := strings.Index(rawURL, "?goose="); idx != -1 {
+		urlToValidate = rawURL[:idx]
 	}
 
 	// Check against strict GitHub PR URL pattern
@@ -149,9 +149,17 @@ func validateGitHubPRURL(rawURL string) error {
 	}
 
 	// Reject URLs with URL encoding (could hide malicious content)
-	// Exception: %3D which is = in URL encoding, only as part of ?goose=1
-	if strings.Contains(rawURL, "%") && !strings.HasSuffix(rawURL, "?goose%3D1") {
-		return errors.New("URL contains encoded characters")
+	// Exception: %3D which is = in URL encoding, only as part of ?goose parameter
+	if strings.Contains(rawURL, "%") {
+		// Allow URL encoding only in the goose parameter value
+		if idx := strings.Index(rawURL, "?goose="); idx != -1 {
+			// Check if encoding is only in the goose parameter
+			if strings.Contains(rawURL[:idx], "%") {
+				return errors.New("URL contains encoded characters outside goose parameter")
+			}
+		} else {
+			return errors.New("URL contains encoded characters")
+		}
 	}
 
 	// Reject URLs with fragments
@@ -159,9 +167,16 @@ func validateGitHubPRURL(rawURL string) error {
 		return errors.New("URL contains fragments")
 	}
 
-	// Allow only ?goose=1 query parameter, nothing else
-	if strings.Contains(rawURL, "?") && !strings.HasSuffix(rawURL, "?goose=1") && !strings.HasSuffix(rawURL, "?goose%3D1") {
-		return errors.New("URL contains unexpected query parameters")
+	// Allow only ?goose=<value> query parameter, nothing else
+	if strings.Contains(rawURL, "?") {
+		// Check if it's the goose parameter
+		if idx := strings.Index(rawURL, "?goose="); idx == -1 {
+			return errors.New("URL contains unexpected query parameters")
+		}
+		// Ensure no additional parameters after goose
+		if strings.Contains(rawURL[strings.Index(rawURL, "?goose=")+7:], "&") {
+			return errors.New("URL contains additional query parameters")
+		}
 	}
 
 	// Reject URLs with double slashes (except after https:)

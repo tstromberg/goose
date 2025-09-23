@@ -462,10 +462,12 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			needsReview := false
 			isBlocked := false
 			actionReason := ""
+			actionKind := ""
 			if action, exists := result.turnData.Analysis.NextAction[user]; exists {
 				needsReview = true
 				isBlocked = action.Critical // Only critical actions are blocking
 				actionReason = action.Reason
+				actionKind = string(action.Kind)
 				// Only log fresh API calls
 				if !result.wasFromCache {
 					slog.Debug("[TURN] NextAction", "url", result.url, "reason", action.Reason, "kind", action.Kind, "critical", action.Critical)
@@ -479,6 +481,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 						(*outgoing)[i].NeedsReview = needsReview
 						(*outgoing)[i].IsBlocked = isBlocked
 						(*outgoing)[i].ActionReason = actionReason
+						(*outgoing)[i].ActionKind = actionKind
 						break
 					}
 				}
@@ -487,6 +490,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 					if (*incoming)[i].URL == result.url {
 						(*incoming)[i].NeedsReview = needsReview
 						(*incoming)[i].ActionReason = actionReason
+						(*incoming)[i].ActionKind = actionKind
 						break
 					}
 				}
