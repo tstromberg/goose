@@ -13,7 +13,7 @@ require (
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
-	github.com/codeGROOVE-dev/prx v0.0.0-20250908203157-0711b3ec5471 // indirect
+	github.com/codeGROOVE-dev/prx v0.0.0-20250923100916-d2b60be50274 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
