@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
+	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/google/go-github/v57/github"
-	"github.com/ready-to-review/turnclient/pkg/turn"
 	"golang.org/x/oauth2"
 )
 
@@ -42,8 +42,8 @@ func (app *App) initClients(ctx context.Context) error {
 	tc := oauth2.NewClient(ctx, ts)
 	app.client = github.NewClient(tc)
 
-	// Initialize Turn client with base URL
-	turnClient, err := turn.NewClient("https://turn.ready-to-review.dev")
+	// Initialize Turn client using default backend
+	turnClient, err := turn.NewDefaultClient()
 	if err != nil {
 		return fmt.Errorf("create turn client: %w", err)
 	}
@@ -450,7 +450,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 	cacheHits := 0
 
 	for result := range results {
-		if result.err == nil && result.turnData != nil && result.turnData.PRState.UnblockAction != nil {
+		if result.err == nil && result.turnData != nil && result.turnData.Analysis.NextAction != nil {
 			turnSuccesses++
 			if result.wasFromCache {
 				cacheHits++
@@ -460,13 +460,15 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 
 			// Check if user needs to review and get action reason
 			needsReview := false
+			isBlocked := false
 			actionReason := ""
-			if action, exists := result.turnData.PRState.UnblockAction[user]; exists {
+			if action, exists := result.turnData.Analysis.NextAction[user]; exists {
 				needsReview = true
+				isBlocked = action.Critical // Only critical actions are blocking
 				actionReason = action.Reason
 				// Only log fresh API calls
 				if !result.wasFromCache {
-					slog.Debug("[TURN] UnblockAction", "url", result.url, "reason", action.Reason, "kind", action.Kind)
+					slog.Debug("[TURN] NextAction", "url", result.url, "reason", action.Reason, "kind", action.Kind, "critical", action.Critical)
 				}
 			}
 
@@ -475,7 +477,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 				for i := range *outgoing {
 					if (*outgoing)[i].URL == result.url {
 						(*outgoing)[i].NeedsReview = needsReview
-						(*outgoing)[i].IsBlocked = needsReview
+						(*outgoing)[i].IsBlocked = isBlocked
 						(*outgoing)[i].ActionReason = actionReason
 						break
 					}

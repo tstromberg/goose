@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/retry"
+	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray"
 	"github.com/google/go-github/v57/github"
-	"github.com/ready-to-review/turnclient/pkg/turn"
 )
 
 // Version information - set during build with -ldflags.
