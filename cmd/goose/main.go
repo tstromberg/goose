@@ -30,8 +30,8 @@ var (
 )
 
 const (
-	cacheTTL                  = 2 * time.Hour
-	cacheCleanupInterval      = 5 * 24 * time.Hour
+	cacheTTL                  = 10 * 24 * time.Hour // 10 days - rely mostly on PR UpdatedAt
+	cacheCleanupInterval      = 15 * 24 * time.Hour // 15 days - cleanup older than cache TTL
 	stalePRThreshold          = 90 * 24 * time.Hour
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
@@ -45,7 +45,8 @@ const (
 	turnAPITimeout            = 10 * time.Second
 	maxConcurrentTurnAPICalls = 20
 	defaultMaxBrowserOpensDay = 20
-	startupGracePeriod        = 30 * time.Second // Don't play sounds or auto-open for first 30 seconds
+	startupGracePeriod        = 1 * time.Minute  // Don't play sounds or auto-open for first minute
+	maxAgeForNewlyBlocked     = 1 * time.Hour     // PRs older than this won't be treated as newly blocked
 )
 
 // PR represents a pull request with metadata.
@@ -56,9 +57,11 @@ type PR struct {
 	Title             string
 	URL               string
 	Repository        string
+	Author            string // GitHub username of the PR author
 	ActionReason      string
 	ActionKind        string // The kind of action expected (review, merge, fix_tests, etc.)
 	Number            int
+	IsDraft           bool
 	IsBlocked         bool
 	NeedsReview       bool
 }
@@ -94,64 +97,22 @@ type App struct {
 	enableAudioCues     bool
 	initialLoadComplete bool
 	menuInitialized     bool
-}
-
-func loadCurrentUser(ctx context.Context, app *App) {
-	slog.Info("Loading current user...")
-
-	if app.client == nil {
-		slog.Info("Skipping user load - no GitHub client available")
-		return
-	}
-
-	var user *github.User
-	err := retry.Do(func() error {
-		var retryErr error
-		user, _, retryErr = app.client.Users.Get(ctx, "")
-		if retryErr != nil {
-			slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
-			return retryErr
-		}
-		return nil
-	},
-		retry.Attempts(maxRetries),
-		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
-		retry.MaxDelay(maxRetryDelay),
-		retry.OnRetry(func(n uint, err error) {
-			slog.Warn("[GITHUB] Users.Get retry", "attempt", n+1, "maxRetries", maxRetries, "error", err)
-		}),
-		retry.Context(ctx),
-	)
-	if err != nil {
-		slog.Warn("Failed to load current user after retries", "maxRetries", maxRetries, "error", err)
-		if app.authError == "" {
-			app.authError = fmt.Sprintf("Failed to load user: %v", err)
-		}
-		return
-	}
-
-	if user == nil {
-		slog.Warn("GitHub API returned nil user")
-		return
-	}
-
-	app.currentUser = user
-	// Log if we're using a different target user (sanitized)
-	if app.targetUser != "" && app.targetUser != user.GetLogin() {
-		slog.Info("Querying PRs for different user", "targetUser", sanitizeForLog(app.targetUser))
-	}
+	healthMonitor       *healthMonitor
+	githubCircuit       *circuitBreaker
 }
 
 func main() {
 	// Parse command line flags
 	var targetUser string
 	var noCache bool
+	var debugMode bool
 	var updateInterval time.Duration
 	var browserOpenDelay time.Duration
 	var maxBrowserOpensMinute int
 	var maxBrowserOpensDay int
 	flag.StringVar(&targetUser, "user", "", "GitHub user to query PRs for (defaults to authenticated user)")
 	flag.BoolVar(&noCache, "no-cache", false, "Bypass cache for debugging")
+	flag.BoolVar(&debugMode, "debug", false, "Enable debug logging")
 	flag.DurationVar(&updateInterval, "interval", defaultUpdateInterval, "Update interval (e.g. 30s, 1m, 5m)")
 	flag.DurationVar(&browserOpenDelay, "browser-delay", 1*time.Minute, "Minimum delay before opening PRs in browser after startup")
 	flag.IntVar(&maxBrowserOpensMinute, "browser-max-per-minute", 2, "Maximum browser windows to open per minute")
@@ -187,9 +148,13 @@ func main() {
 	}
 
 	// Set up structured logging with source location
+	logLevel := slog.LevelInfo
+	if debugMode {
+		logLevel = slog.LevelDebug
+	}
 	opts := &slog.HandlerOptions{
 		AddSource: true,
-		Level:     slog.LevelInfo,
+		Level:     logLevel,
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
 	slog.Info("Starting GitHub PR Monitor", "version", version, "commit", commit, "date", date)
@@ -252,6 +217,8 @@ func main() {
 		// Deprecated fields for test compatibility
 		previousBlockedPRs: make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
+		healthMonitor:      newHealthMonitor(),
+		githubCircuit:      newCircuitBreaker("github", 5, 2*time.Minute),
 	}
 
 	// Load saved settings
@@ -266,7 +233,43 @@ func main() {
 	}
 
 	// Load current user if we have a client
-	loadCurrentUser(ctx, app)
+	slog.Info("Loading current user...")
+	if app.client != nil {
+		var user *github.User
+		err := retry.Do(func() error {
+			var retryErr error
+			user, _, retryErr = app.client.Users.Get(ctx, "")
+			if retryErr != nil {
+				slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
+				return retryErr
+			}
+			return nil
+		},
+			retry.Attempts(maxRetries),
+			retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)), // Add jitter for better backoff distribution
+			retry.MaxDelay(maxRetryDelay),
+			retry.OnRetry(func(n uint, err error) {
+				slog.Warn("[GITHUB] Users.Get retry", "attempt", n+1, "maxRetries", maxRetries, "error", err)
+			}),
+			retry.Context(ctx),
+		)
+		if err != nil {
+			slog.Warn("Failed to load current user after retries", "maxRetries", maxRetries, "error", err)
+			if app.authError == "" {
+				app.authError = fmt.Sprintf("Failed to load user: %v", err)
+			}
+		} else if user != nil {
+			app.currentUser = user
+			// Log if we're using a different target user (sanitized)
+			if app.targetUser != "" && app.targetUser != user.GetLogin() {
+				slog.Info("Querying PRs for different user", "targetUser", sanitizeForLog(app.targetUser))
+			}
+		} else {
+			slog.Warn("GitHub API returned nil user")
+		}
+	} else {
+		slog.Info("Skipping user load - no GitHub client available")
+	}
 
 	slog.Info("Starting systray...")
 	// Create a cancellable context for the application
@@ -368,6 +371,11 @@ func (app *App) updateLoop(ctx context.Context) {
 
 	ticker := time.NewTicker(app.updateInterval)
 	defer ticker.Stop()
+
+	// Health monitoring ticker - log metrics every 5 minutes
+	healthTicker := time.NewTicker(5 * time.Minute)
+	defer healthTicker.Stop()
+
 	slog.Info("[UPDATE] Update loop started", "interval", app.updateInterval)
 
 	// Initial update with wait for Turn data
@@ -375,6 +383,11 @@ func (app *App) updateLoop(ctx context.Context) {
 
 	for {
 		select {
+		case <-healthTicker.C:
+			// Log health metrics periodically
+			if app.healthMonitor != nil {
+				app.healthMonitor.logMetrics()
+			}
 		case <-ticker.C:
 			// Check if we should skip this scheduled update due to recent forced refresh
 			app.mu.RLock()
@@ -396,7 +409,12 @@ func (app *App) updateLoop(ctx context.Context) {
 }
 
 func (app *App) updatePRs(ctx context.Context) {
-	incoming, outgoing, err := app.fetchPRsInternal(ctx)
+	var incoming, outgoing []PR
+	err := safeExecute("fetchPRs", func() error {
+		var fetchErr error
+		incoming, outgoing, fetchErr = app.fetchPRsInternal(ctx)
+		return fetchErr
+	})
 	if err != nil {
 		slog.Error("Error fetching PRs", "error", err)
 		app.mu.Lock()
@@ -501,6 +519,21 @@ func (app *App) updatePRs(ctx context.Context) {
 
 	app.incoming = incoming
 	app.outgoing = outgoing
+	slog.Info("[UPDATE] PR counts after update",
+		"incoming_count", len(incoming),
+		"outgoing_count", len(outgoing))
+	// Log ALL outgoing PRs for debugging (temporarily)
+	slog.Info("[UPDATE] Listing ALL outgoing PRs for debugging")
+	for i, pr := range outgoing {
+		slog.Info("[UPDATE] Outgoing PR details",
+			"index", i,
+			"repo", pr.Repository,
+			"number", pr.Number,
+			"blocked", pr.IsBlocked,
+			"updated_at", pr.UpdatedAt.Format(time.RFC3339),
+			"title", pr.Title,
+			"url", pr.URL)
+	}
 	// Mark initial load as complete after first successful update
 	if !app.initialLoadComplete {
 		app.initialLoadComplete = true
@@ -664,6 +697,17 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 // tryAutoOpenPR attempts to open a PR in the browser if enabled and rate limits allow.
 func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled bool, startTime time.Time) {
 	if !autoBrowserEnabled {
+		return
+	}
+
+	// Skip draft PRs authored by the user we're querying for
+	queriedUser := app.targetUser
+	if queriedUser == "" && app.currentUser != nil {
+		queriedUser = app.currentUser.GetLogin()
+	}
+	if pr.IsDraft && pr.Author == queriedUser {
+		slog.Debug("[BROWSER] Skipping auto-open for draft PR by queried user",
+			"repo", pr.Repository, "number", pr.Number, "author", pr.Author)
 		return
 	}
 

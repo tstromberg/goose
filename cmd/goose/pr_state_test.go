@@ -15,6 +15,7 @@ func TestPRStateManager(t *testing.T) {
 		Number:      1,
 		URL:         "https://github.com/test/repo/pull/1",
 		NeedsReview: true,
+		UpdatedAt:   time.Now(), // Recently updated PR
 	}
 
 	toNotify := mgr.UpdatePRs([]PR{pr1}, []PR{}, map[string]bool{})
@@ -58,6 +59,7 @@ func TestPRStateManagerGracePeriod(t *testing.T) {
 		Number:      1,
 		URL:         "https://github.com/test/repo/pull/1",
 		NeedsReview: true,
+		UpdatedAt:   time.Now(), // Recently updated PR
 	}
 
 	toNotify := mgr.UpdatePRs([]PR{pr1}, []PR{}, map[string]bool{})
@@ -88,6 +90,7 @@ func TestPRStateManagerHiddenOrgs(t *testing.T) {
 		Number:     1,
 		URL:        "https://github.com/hidden-org/repo/pull/1",
 		IsBlocked:  true,
+		UpdatedAt:  time.Now(), // Recently updated PR
 	}
 
 	pr2 := PR{
@@ -95,6 +98,7 @@ func TestPRStateManagerHiddenOrgs(t *testing.T) {
 		Number:     2,
 		URL:        "https://github.com/visible-org/repo/pull/2",
 		IsBlocked:  true,
+		UpdatedAt:  time.Now(), // Recently updated PR
 	}
 
 	hiddenOrgs := map[string]bool{

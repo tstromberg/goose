@@ -35,6 +35,13 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	hash := sha256.Sum256([]byte(key))
 	cacheFile := filepath.Join(app.cacheDir, hex.EncodeToString(hash[:])[:16]+".json")
 
+	// Log the cache key details
+	slog.Debug("[CACHE] Checking cache",
+		"url", url,
+		"updated_at", updatedAt.Format(time.RFC3339),
+		"cache_key", key,
+		"cache_file", filepath.Base(cacheFile))
+
 	// Skip cache if --no-cache flag is set
 	if !app.noCache {
 		// Try to read from cache (gracefully handle all cache errors)
@@ -47,9 +54,33 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 					slog.Error("Failed to remove corrupted cache file", "error", removeErr)
 				}
 			} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
-				// Check if cache is still valid (2 hour TTL)
+				// Check if cache is still valid (10 day TTL, but PR UpdatedAt is primary check)
+				slog.Debug("[CACHE] Cache hit",
+					"url", url,
+					"cached_at", entry.CachedAt.Format(time.RFC3339),
+					"cache_age", time.Since(entry.CachedAt).Round(time.Second),
+					"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339))
+				if app.healthMonitor != nil {
+					app.healthMonitor.recordCacheAccess(true)
+				}
 				return entry.Data, true, nil
+			} else {
+				// Log why cache was invalid
+				if !entry.UpdatedAt.Equal(updatedAt) {
+					slog.Debug("[CACHE] Cache miss - PR updated",
+						"url", url,
+						"cached_pr_time", entry.UpdatedAt.Format(time.RFC3339),
+						"current_pr_time", updatedAt.Format(time.RFC3339))
+				} else if time.Since(entry.CachedAt) >= cacheTTL {
+					slog.Debug("[CACHE] Cache miss - TTL expired",
+						"url", url,
+						"cached_at", entry.CachedAt.Format(time.RFC3339),
+						"cache_age", time.Since(entry.CachedAt).Round(time.Second),
+						"ttl", cacheTTL)
+				}
 			}
+		} else if !os.IsNotExist(readErr) {
+			slog.Debug("[CACHE] Cache file read error", "url", url, "error", readErr)
 		}
 	}
 
@@ -57,7 +88,12 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	if app.noCache {
 		slog.Debug("Cache bypassed (--no-cache), fetching from Turn API", "url", url)
 	} else {
-		slog.Debug("Cache miss, fetching from Turn API", "url", url)
+		slog.Info("[CACHE] Cache miss, fetching from Turn API",
+			"url", url,
+			"pr_updated_at", updatedAt.Format(time.RFC3339))
+		if app.healthMonitor != nil {
+			app.healthMonitor.recordCacheAccess(false)
+		}
 	}
 
 	// Use exponential backoff with jitter for Turn API calls
@@ -68,11 +104,16 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		defer cancel()
 
 		var retryErr error
+		slog.Debug("[TURN] Making API call",
+			"url", url,
+			"user", app.currentUser.GetLogin(),
+			"pr_updated_at", updatedAt.Format(time.RFC3339))
 		data, retryErr = app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), updatedAt)
 		if retryErr != nil {
 			slog.Warn("Turn API error (will retry)", "error", retryErr)
 			return retryErr
 		}
+		slog.Debug("[TURN] API call successful", "url", url)
 		return nil
 	},
 		retry.Attempts(maxRetries),
@@ -85,7 +126,14 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	)
 	if err != nil {
 		slog.Error("Turn API error after retries (will use PR without metadata)", "maxRetries", maxRetries, "error", err)
+		if app.healthMonitor != nil {
+			app.healthMonitor.recordAPICall(false)
+		}
 		return nil, false, err
+	}
+
+	if app.healthMonitor != nil {
+		app.healthMonitor.recordAPICall(true)
 	}
 
 	// Save to cache (don't fail if caching fails) - skip if --no-cache is set
@@ -103,6 +151,12 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 				slog.Error("Failed to create cache directory", "error", dirErr)
 			} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
 				slog.Error("Failed to write cache file", "error", writeErr)
+			} else {
+				slog.Debug("[CACHE] Saved to cache",
+					"url", url,
+					"cached_at", entry.CachedAt.Format(time.RFC3339),
+					"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339),
+					"cache_file", filepath.Base(cacheFile))
 			}
 		}
 	}
@@ -110,7 +164,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	return data, false, nil
 }
 
-// cleanupOldCache removes cache files older than 5 days.
+// cleanupOldCache removes cache files older than the cleanup interval (15 days).
 func (app *App) cleanupOldCache() {
 	entries, err := os.ReadDir(app.cacheDir)
 	if err != nil {
@@ -131,7 +185,7 @@ func (app *App) cleanupOldCache() {
 			continue
 		}
 
-		// Remove cache files older than 5 days
+		// Remove cache files older than cleanup interval (15 days)
 		if time.Since(info.ModTime()) > cacheCleanupInterval {
 			filePath := filepath.Join(app.cacheDir, entry.Name())
 			if removeErr := os.Remove(filePath); removeErr != nil {

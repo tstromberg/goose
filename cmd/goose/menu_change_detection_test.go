@@ -17,7 +17,7 @@ func TestMenuChangeDetection(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{},
 		incoming: []PR{
 			{Repository: "org1/repo1", Number: 1, Title: "Fix bug", URL: "https://github.com/org1/repo1/pull/1", NeedsReview: true, UpdatedAt: time.Now()},
@@ -110,7 +110,7 @@ func TestFirstRunMenuRebuildBug(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		menuInitialized:    false,
 		systrayInterface:   &MockSystray{},
 		lastMenuTitles:     nil, // This is nil on first run - the bug condition
@@ -169,7 +169,7 @@ func TestHiddenOrgChangesMenu(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{},
 		incoming: []PR{
 			{Repository: "org1/repo1", Number: 1, Title: "PR 1", URL: "https://github.com/org1/repo1/pull/1"},

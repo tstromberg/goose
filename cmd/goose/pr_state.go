@@ -73,24 +73,44 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 		// Get or create state for this PR
 		state, exists := m.states[pr.URL]
 		if !exists {
-			// New blocked PR!
-			state = &PRState{
-				PR:              pr,
-				FirstBlockedAt:  now,
-				LastSeenBlocked: now,
-				HasNotified:     false,
-			}
-			m.states[pr.URL] = state
+			// Check if PR is too old to be considered "newly blocked"
+			// If the PR hasn't been updated in over an hour, don't treat it as new
+			const maxAgeForNewlyBlocked = 1 * time.Hour
+			prAge := time.Since(pr.UpdatedAt)
 
-			slog.Info("[STATE] New blocked PR detected", "repo", pr.Repository, "number", pr.Number)
+			if prAge > maxAgeForNewlyBlocked {
+				// Old PR, track it but don't notify
+				state = &PRState{
+					PR:              pr,
+					FirstBlockedAt:  now,
+					LastSeenBlocked: now,
+					HasNotified:     true, // Mark as already notified to prevent future notifications
+				}
+				m.states[pr.URL] = state
+				slog.Debug("[STATE] Blocked PR detected but too old to notify",
+					"repo", pr.Repository, "number", pr.Number,
+					"age", prAge.Round(time.Minute), "maxAge", maxAgeForNewlyBlocked)
+			} else {
+				// New blocked PR that was recently updated!
+				state = &PRState{
+					PR:              pr,
+					FirstBlockedAt:  now,
+					LastSeenBlocked: now,
+					HasNotified:     false,
+				}
+				m.states[pr.URL] = state
 
-			// Should we notify?
-			if !inGracePeriod && !state.HasNotified {
-				slog.Debug("[STATE] Will notify for newly blocked PR", "repo", pr.Repository, "number", pr.Number)
-				toNotify = append(toNotify, pr)
-				state.HasNotified = true
-			} else if inGracePeriod {
-				slog.Debug("[STATE] In grace period, not notifying", "repo", pr.Repository, "number", pr.Number)
+				slog.Info("[STATE] New blocked PR detected", "repo", pr.Repository, "number", pr.Number,
+					"age", prAge.Round(time.Minute))
+
+				// Should we notify?
+				if !inGracePeriod && !state.HasNotified {
+					slog.Debug("[STATE] Will notify for newly blocked PR", "repo", pr.Repository, "number", pr.Number)
+					toNotify = append(toNotify, pr)
+					state.HasNotified = true
+				} else if inGracePeriod {
+					slog.Debug("[STATE] In grace period, not notifying", "repo", pr.Repository, "number", pr.Number)
+				}
 			}
 		} else {
 			// PR was already blocked

@@ -70,7 +70,7 @@ func TestMenuItemTitleTransition(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
@@ -185,7 +185,7 @@ func TestTrayIconRestoredAfterNetworkRecovery(t *testing.T) {
 		blockedPRTimes:     make(map[string]time.Time),
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
-		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   mock,
 		menuInitialized:    true,
 	}
@@ -226,7 +226,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 		blockedPRTimes:     make(map[string]time.Time),
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
-		browserRateLimiter: NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
@@ -349,7 +349,7 @@ func TestSoundPlaybackDuringTransitions(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     true,
 		initialLoadComplete: true, // Set to true to allow sound playback
 		menuInitialized:     true,
@@ -494,7 +494,7 @@ func TestSoundDisabledNoPlayback(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     false, // Audio disabled
 		initialLoadComplete: true,
 		menuInitialized:     true,
@@ -534,7 +534,7 @@ func TestGracePeriodPreventsNotifications(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     true,
 		initialLoadComplete: true,
 		menuInitialized:     true,
@@ -569,8 +569,8 @@ func TestGracePeriodPreventsNotifications(t *testing.T) {
 		t.Errorf("Expected PR to be tracked as blocked during grace period")
 	}
 
-	// Now simulate time passing beyond grace period
-	app.startTime = time.Now().Add(-31 * time.Second)
+	// Now simulate time passing beyond grace period (1 minute)
+	app.startTime = time.Now().Add(-61 * time.Second)
 
 	// New PR becomes blocked after grace period
 	app.incoming = []PR{
@@ -659,7 +659,7 @@ func TestNotificationScenarios(t *testing.T) {
 				hiddenOrgs:          make(map[string]bool),
 				seenOrgs:            make(map[string]bool),
 				previousBlockedPRs:  make(map[string]bool),
-				browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+				browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 				enableAudioCues:     true,
 				initialLoadComplete: tt.initialLoadComplete,
 				menuInitialized:     true,
@@ -719,7 +719,7 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(30*time.Second, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     true,
 		initialLoadComplete: true, // Already past initial load
 		menuInitialized:     true,
