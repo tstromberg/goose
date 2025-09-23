@@ -297,16 +297,19 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 			// Get the blocked time from state manager
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
-			// Show emoji for PRs blocked within the last 5 minutes
-			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
+			// Show emoji for PRs blocked within the last 5 minutes (but only for real state transitions, not initial discoveries)
+			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration && !prState.IsInitialDiscovery {
 				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				// Use party popper for outgoing PRs, goose for incoming PRs
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
-					slog.Debug("[MENU] Adding party popper to outgoing PR",
+					slog.Info("[MENU] Adding party popper to outgoing PR",
+						"repo", sortedPRs[prIndex].Repository,
+						"number", sortedPRs[prIndex].Number,
 						"url", sortedPRs[prIndex].URL,
-						"blocked_ago", timeSinceBlocked,
-						"remaining", blockedPRIconDuration-timeSinceBlocked)
+						"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+						"blocked_ago", timeSinceBlocked.Round(time.Second),
+						"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
 					slog.Debug("[MENU] Adding goose to incoming PR",
@@ -479,15 +482,42 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
-			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
+			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration && !prState.IsInitialDiscovery {
+				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
+					slog.Info("[MENU] Adding party popper to outgoing PR in generateMenuTitles",
+						"repo", sortedPRs[prIndex].Repository,
+						"number", sortedPRs[prIndex].Number,
+						"url", sortedPRs[prIndex].URL,
+						"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+						"blocked_ago", timeSinceBlocked.Round(time.Second),
+						"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
+					slog.Debug("[MENU] Adding goose to incoming PR in generateMenuTitles",
+						"url", sortedPRs[prIndex].URL,
+						"blocked_ago", timeSinceBlocked,
+						"remaining", blockedPRIconDuration-timeSinceBlocked)
 				}
 			} else {
 				// Use block/square icon for blocked PRs
 				title = fmt.Sprintf("■ %s", title)
+				// Log when we use block icon instead of emoji
+				if hasState && !prState.FirstBlockedAt.IsZero() {
+					timeSinceBlocked := time.Since(prState.FirstBlockedAt)
+					if sectionTitle == "Outgoing" {
+						slog.Debug("[MENU] Using block icon instead of party popper in generateMenuTitles",
+							"url", sortedPRs[prIndex].URL,
+							"blocked_ago", timeSinceBlocked.Round(time.Second),
+							"icon_duration", blockedPRIconDuration)
+					}
+				} else if !hasState {
+					slog.Debug("[MENU] No state found for blocked PR, using block icon",
+						"url", sortedPRs[prIndex].URL,
+						"repo", sortedPRs[prIndex].Repository,
+						"number", sortedPRs[prIndex].Number)
+				}
 			}
 		} else if sortedPRs[prIndex].ActionKind != "" {
 			// PR has an action but isn't blocked - add bullet to indicate it could use input

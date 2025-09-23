@@ -46,7 +46,6 @@ const (
 	maxConcurrentTurnAPICalls = 20
 	defaultMaxBrowserOpensDay = 20
 	startupGracePeriod        = 1 * time.Minute  // Don't play sounds or auto-open for first minute
-	maxAgeForNewlyBlocked     = 1 * time.Hour     // PRs older than this won't be treated as newly blocked
 )
 
 // PR represents a pull request with metadata.
@@ -93,6 +92,7 @@ type App struct {
 	mu                  sync.RWMutex
 	enableAutoBrowser   bool
 	hideStaleIncoming   bool
+	hasPerformedInitialDiscovery bool // Track if we've done the first poll to distinguish from real state changes
 	noCache             bool
 	enableAudioCues     bool
 	initialLoadComplete bool
@@ -522,10 +522,10 @@ func (app *App) updatePRs(ctx context.Context) {
 	slog.Info("[UPDATE] PR counts after update",
 		"incoming_count", len(incoming),
 		"outgoing_count", len(outgoing))
-	// Log ALL outgoing PRs for debugging (temporarily)
-	slog.Info("[UPDATE] Listing ALL outgoing PRs for debugging")
+	// Log ALL outgoing PRs for debugging
+	slog.Debug("[UPDATE] Listing ALL outgoing PRs for debugging")
 	for i, pr := range outgoing {
-		slog.Info("[UPDATE] Outgoing PR details",
+		slog.Debug("[UPDATE] Outgoing PR details",
 			"index", i,
 			"repo", pr.Repository,
 			"number", pr.Number,
@@ -550,6 +550,7 @@ func (app *App) updatePRs(ctx context.Context) {
 
 // updateMenu rebuilds the menu only if there are changes to improve UX.
 func (app *App) updateMenu(ctx context.Context) {
+	slog.Debug("[MENU] updateMenu called, generating current titles")
 	// Generate current menu titles
 	currentTitles := app.generateMenuTitles()
 
@@ -566,6 +567,21 @@ func (app *App) updateMenu(ctx context.Context) {
 
 	// Titles have changed, rebuild menu
 	slog.Info("[MENU] Changes detected, rebuilding menu", "oldCount", len(lastTitles), "newCount", len(currentTitles))
+
+	// Log what changed for debugging
+	for i, current := range currentTitles {
+		if i < len(lastTitles) {
+			if current != lastTitles[i] {
+				slog.Debug("[MENU] Title changed", "index", i, "old", lastTitles[i], "new", current)
+			}
+		} else {
+			slog.Debug("[MENU] New title added", "index", i, "title", current)
+		}
+	}
+	for i := len(currentTitles); i < len(lastTitles); i++ {
+		slog.Debug("[MENU] Title removed", "index", i, "title", lastTitles[i])
+	}
+
 	app.rebuildMenu(ctx)
 
 	// Store new titles
@@ -669,6 +685,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 	if !app.menuInitialized {
 		// Create initial menu with Turn data
 		// Initialize menu structure
+		slog.Info("[FLOW] Creating initial menu (first time)")
 		app.rebuildMenu(ctx)
 		app.menuInitialized = true
 		// Store initial menu titles to prevent unnecessary rebuild on first update
@@ -678,14 +695,17 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		app.lastMenuTitles = menuTitles
 		app.mu.Unlock()
 		// Menu initialization complete
+		slog.Info("[FLOW] Initial menu created successfully")
 	} else {
+		slog.Info("[FLOW] Updating existing menu")
 		app.updateMenu(ctx)
+		slog.Info("[FLOW] Menu update completed")
 	}
 
 	// Process notifications using the simplified state manager
-	slog.Debug("[DEBUG] Processing PR state updates and notifications")
+	slog.Info("[FLOW] About to process PR state updates and notifications")
 	app.updatePRStatesAndNotify(ctx)
-	slog.Debug("[DEBUG] Completed PR state updates and notifications")
+	slog.Info("[FLOW] Completed PR state updates and notifications")
 	// Mark initial load as complete after first successful update
 	if !app.initialLoadComplete {
 		app.mu.Lock()

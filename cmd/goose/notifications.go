@@ -26,8 +26,17 @@ func (app *App) processNotifications(ctx context.Context) {
 	copy(outgoing, app.outgoing)
 	app.mu.RUnlock()
 
+	// Determine if this is the initial discovery
+	isInitialDiscovery := !app.hasPerformedInitialDiscovery
+
 	// Let the state manager figure out what needs notifications
-	toNotify := app.stateManager.UpdatePRs(incoming, outgoing, hiddenOrgs)
+	toNotify := app.stateManager.UpdatePRs(incoming, outgoing, hiddenOrgs, isInitialDiscovery)
+
+	// Mark that we've performed initial discovery
+	if isInitialDiscovery {
+		app.hasPerformedInitialDiscovery = true
+		slog.Info("[STATE] Initial discovery completed", "incoming_count", len(incoming), "outgoing_count", len(outgoing))
+	}
 
 	// Update deprecated fields for test compatibility
 	app.mu.Lock()
@@ -81,8 +90,9 @@ func (app *App) processNotifications(ctx context.Context) {
 
 	// Update menu if we sent notifications
 	if len(toNotify) > 0 {
-		slog.Debug("[NOTIFY] Updating menu after notifications")
+		slog.Info("[FLOW] Updating menu after sending notifications", "notified_count", len(toNotify))
 		app.updateMenu(ctx)
+		slog.Info("[FLOW] Menu update after notifications completed")
 	}
 }
 
