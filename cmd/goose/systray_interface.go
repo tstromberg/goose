@@ -10,6 +10,7 @@ type SystrayInterface interface {
 	AddMenuItem(title, tooltip string) MenuItem
 	AddSeparator()
 	SetTitle(title string)
+	SetIcon(iconBytes []byte)
 	SetOnClick(fn func(menu systray.IMenu))
 	Quit()
 }
@@ -32,6 +33,10 @@ func (*RealSystray) AddSeparator() {
 
 func (*RealSystray) SetTitle(title string) {
 	systray.SetTitle(title)
+}
+
+func (*RealSystray) SetIcon(iconBytes []byte) {
+	systray.SetIcon(iconBytes)
 }
 
 func (*RealSystray) SetOnClick(fn func(menu systray.IMenu)) {
@@ -67,6 +72,10 @@ func (m *MockSystray) AddSeparator() {
 
 func (m *MockSystray) SetTitle(title string) {
 	m.title = title
+}
+
+func (*MockSystray) SetIcon(iconBytes []byte) {
+	// No-op for testing
 }
 
 func (*MockSystray) SetOnClick(_ func(menu systray.IMenu)) {
