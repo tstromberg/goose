@@ -91,6 +91,7 @@ type App struct {
 	updateInterval      time.Duration
 	consecutiveFailures int
 	mu                  sync.RWMutex
+	menuMutex           sync.Mutex // Mutex to prevent concurrent menu rebuilds
 	enableAutoBrowser   bool
 	hideStaleIncoming   bool
 	hasPerformedInitialDiscovery bool // Track if we've done the first poll to distinguish from real state changes

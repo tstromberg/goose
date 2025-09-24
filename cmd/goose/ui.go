@@ -555,6 +555,10 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 
 // rebuildMenu completely rebuilds the menu from scratch.
 func (app *App) rebuildMenu(ctx context.Context) {
+	// Prevent concurrent menu rebuilds
+	app.menuMutex.Lock()
+	defer app.menuMutex.Unlock()
+
 	// Rebuild entire menu
 	slog.Info("[MENU] Starting rebuildMenu", "os", runtime.GOOS)
 

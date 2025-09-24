@@ -90,14 +90,10 @@ func (app *App) processNotifications(ctx context.Context) {
 			}
 		}
 
-		// Update menu if we sent notifications
-		if len(toNotify) > 0 {
-			slog.Debug("[NOTIFY] Updating menu after notifications")
-			app.updateMenu(ctx)
-		}
 	}()
 
-	// Update menu if we sent notifications
+	// Update menu immediately after sending notifications
+	// This needs to happen in the main thread to show the party popper emoji
 	if len(toNotify) > 0 {
 		slog.Info("[FLOW] Updating menu after sending notifications", "notified_count", len(toNotify))
 		app.updateMenu(ctx)

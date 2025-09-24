@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"sync"
 
 	"github.com/energye/systray"
 )
@@ -54,15 +55,20 @@ func (*RealSystray) Quit() {
 
 // MockSystray implements SystrayInterface for testing.
 type MockSystray struct {
+	mu        sync.Mutex
 	title     string
 	menuItems []string
 }
 
 func (m *MockSystray) ResetMenu() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.menuItems = nil
 }
 
 func (m *MockSystray) AddMenuItem(title, tooltip string) MenuItem {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.menuItems = append(m.menuItems, title)
 	// Return a MockMenuItem that won't panic when methods are called
 	return &MockMenuItem{
@@ -72,10 +78,14 @@ func (m *MockSystray) AddMenuItem(title, tooltip string) MenuItem {
 }
 
 func (m *MockSystray) AddSeparator() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.menuItems = append(m.menuItems, "---")
 }
 
 func (m *MockSystray) SetTitle(title string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.title = title
 }
 
