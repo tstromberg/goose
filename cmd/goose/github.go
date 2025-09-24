@@ -22,11 +22,14 @@ import (
 
 // extractOrgFromRepo extracts the organization name from a repository path like "org/repo".
 func extractOrgFromRepo(repo string) string {
-	parts := strings.Split(repo, "/")
-	if len(parts) >= 1 {
-		return parts[0]
+	idx := strings.Index(repo, "/")
+	if idx > 0 {
+		return repo[:idx]
 	}
-	return ""
+	if idx == 0 {
+		return "" // Invalid: starts with "/"
+	}
+	return repo // No slash: return as-is (single segment or empty)
 }
 
 // initClients initializes GitHub and Turn API clients.
@@ -180,25 +183,42 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 	var result *github.IssuesSearchResult
 	var resp *github.Response
 
-	err := retry.Do(func() error {
+	// Use circuit breaker if available
+	if app.githubCircuit != nil {
+		err := app.githubCircuit.call(func() error {
+			return app.executeGitHubQueryInternal(ctx, query, opts, &result, &resp)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	// Fallback to direct execution
+	err := app.executeGitHubQueryInternal(ctx, query, opts, &result, &resp)
+	return result, err
+}
+
+func (app *App) executeGitHubQueryInternal(ctx context.Context, query string, opts *github.SearchOptions, result **github.IssuesSearchResult, resp **github.Response) error {
+	return retry.Do(func() error {
 		// Create timeout context for GitHub API call
 		githubCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 
 		var retryErr error
-		result, resp, retryErr = app.client.Search.Issues(githubCtx, query, opts)
+		*result, *resp, retryErr = app.client.Search.Issues(githubCtx, query, opts)
 		if retryErr != nil {
 			// Enhanced error handling with specific cases
-			if resp != nil {
+			if *resp != nil {
 				const (
 					httpStatusUnauthorized  = 401
 					httpStatusForbidden     = 403
 					httpStatusUnprocessable = 422
 				)
-				switch resp.StatusCode {
+				switch (*resp).StatusCode {
 				case httpStatusForbidden:
-					if resp.Header.Get("X-Ratelimit-Remaining") == "0" {
-						resetTime := resp.Header.Get("X-Ratelimit-Reset")
+					if (*resp).Header.Get("X-Ratelimit-Remaining") == "0" {
+						resetTime := (*resp).Header.Get("X-Ratelimit-Reset")
 						slog.Warn("GitHub API rate limited (will retry)", "resetTime", resetTime)
 						return retryErr // Retry on rate limit
 					}
@@ -211,7 +231,7 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 					slog.Error("GitHub API query invalid", "query", query)
 					return retry.Unrecoverable(fmt.Errorf("github API query invalid: %w", retryErr))
 				default:
-					slog.Warn("GitHub API error (will retry)", "statusCode", resp.StatusCode, "error", retryErr)
+					slog.Warn("GitHub API error (will retry)", "statusCode", (*resp).StatusCode, "error", retryErr)
 				}
 			} else {
 				// Likely network error - retry these
@@ -229,10 +249,6 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 		}),
 		retry.Context(ctx),
 	)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
 }
 
 // prResult holds the result of a Turn API query for a PR.
@@ -371,8 +387,10 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 			Title:      issue.GetTitle(),
 			URL:        issue.GetHTMLURL(),
 			Repository: repo,
+			Author:     issue.GetUser().GetLogin(),
 			Number:     issue.GetNumber(),
 			UpdatedAt:  issue.GetUpdatedAt().Time,
+			IsDraft:    issue.GetDraft(),
 		}
 
 		// Categorize as incoming or outgoing
@@ -477,22 +495,24 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			// Update the PR in the slices directly
 			if result.isOwner {
 				for i := range *outgoing {
-					if (*outgoing)[i].URL == result.url {
-						(*outgoing)[i].NeedsReview = needsReview
-						(*outgoing)[i].IsBlocked = isBlocked
-						(*outgoing)[i].ActionReason = actionReason
-						(*outgoing)[i].ActionKind = actionKind
-						break
+					if (*outgoing)[i].URL != result.url {
+						continue
 					}
+					(*outgoing)[i].NeedsReview = needsReview
+					(*outgoing)[i].IsBlocked = isBlocked
+					(*outgoing)[i].ActionReason = actionReason
+					(*outgoing)[i].ActionKind = actionKind
+					break
 				}
 			} else {
 				for i := range *incoming {
-					if (*incoming)[i].URL == result.url {
-						(*incoming)[i].NeedsReview = needsReview
-						(*incoming)[i].ActionReason = actionReason
-						(*incoming)[i].ActionKind = actionKind
-						break
+					if (*incoming)[i].URL != result.url {
+						continue
 					}
+					(*incoming)[i].NeedsReview = needsReview
+					(*incoming)[i].ActionReason = actionReason
+					(*incoming)[i].ActionKind = actionKind
+					break
 				}
 			}
 		} else if result.err != nil {

@@ -9,10 +9,11 @@ import (
 
 // PRState tracks the complete state of a PR including blocking history.
 type PRState struct {
-	FirstBlockedAt  time.Time
-	LastSeenBlocked time.Time
-	PR              PR
-	HasNotified     bool
+	FirstBlockedAt     time.Time
+	LastSeenBlocked    time.Time
+	PR                 PR
+	HasNotified        bool
+	IsInitialDiscovery bool // True if this PR was discovered as already blocked during startup
 }
 
 // PRStateManager manages all PR states with proper synchronization.
@@ -34,12 +35,17 @@ func NewPRStateManager(startTime time.Time) *PRStateManager {
 
 // UpdatePRs updates the state with new PR data and returns which PRs need notifications.
 // This function is thread-safe and handles all state transitions atomically.
-func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[string]bool) (toNotify []PR) {
+// isInitialDiscovery should be true only on the very first poll to prevent notifications for already-blocked PRs.
+func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[string]bool, isInitialDiscovery bool) (toNotify []PR) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
 	inGracePeriod := time.Since(m.startTime) < time.Duration(m.gracePeriodSeconds)*time.Second
+
+	slog.Debug("[STATE] UpdatePRs called",
+		"incoming", len(incoming), "outgoing", len(outgoing),
+		"existing_states", len(m.states), "in_grace_period", inGracePeriod, "is_initial_discovery", isInitialDiscovery)
 
 	// Track which PRs are currently blocked
 	currentlyBlocked := make(map[string]bool)
@@ -62,7 +68,10 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 		if !isBlocked {
 			// PR is not blocked - remove from tracking if it was
 			if state, exists := m.states[pr.URL]; exists && state != nil {
-				slog.Info("[STATE] PR no longer blocked", "repo", pr.Repository, "number", pr.Number)
+				slog.Info("[STATE] State transition: blocked -> unblocked",
+					"repo", pr.Repository, "number", pr.Number, "url", pr.URL,
+					"was_blocked_since", state.FirstBlockedAt.Format(time.RFC3339),
+					"blocked_duration", time.Since(state.FirstBlockedAt).Round(time.Second))
 				delete(m.states, pr.URL)
 			}
 			continue
@@ -73,32 +82,67 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 		// Get or create state for this PR
 		state, exists := m.states[pr.URL]
 		if !exists {
-			// New blocked PR!
-			state = &PRState{
-				PR:              pr,
-				FirstBlockedAt:  now,
-				LastSeenBlocked: now,
-				HasNotified:     false,
-			}
-			m.states[pr.URL] = state
+			// This PR was not in our state before
+			if isInitialDiscovery {
+				// Initial discovery: PR was already blocked when we started, no state transition
+				state = &PRState{
+					PR:                 pr,
+					FirstBlockedAt:     now,
+					LastSeenBlocked:    now,
+					HasNotified:        false, // Don't consider this as notified since no actual notification was sent
+					IsInitialDiscovery: true,  // Mark as initial discovery to prevent notifications and party poppers
+				}
+				m.states[pr.URL] = state
 
-			slog.Info("[STATE] New blocked PR detected", "repo", pr.Repository, "number", pr.Number)
+				slog.Info("[STATE] Initial discovery: already blocked PR",
+					"repo", pr.Repository,
+					"number", pr.Number,
+					"url", pr.URL,
+					"pr_updated_at", pr.UpdatedAt.Format(time.RFC3339),
+					"firstBlockedAt", state.FirstBlockedAt.Format(time.RFC3339))
+			} else {
+				// Actual state transition: unblocked -> blocked
+				state = &PRState{
+					PR:                 pr,
+					FirstBlockedAt:     now,
+					LastSeenBlocked:    now,
+					HasNotified:        false,
+					IsInitialDiscovery: false, // This is a real state transition
+				}
+				m.states[pr.URL] = state
 
-			// Should we notify?
-			if !inGracePeriod && !state.HasNotified {
-				slog.Debug("[STATE] Will notify for newly blocked PR", "repo", pr.Repository, "number", pr.Number)
-				toNotify = append(toNotify, pr)
-				state.HasNotified = true
-			} else if inGracePeriod {
-				slog.Debug("[STATE] In grace period, not notifying", "repo", pr.Repository, "number", pr.Number)
+				slog.Info("[STATE] State transition: unblocked -> blocked",
+					"repo", pr.Repository,
+					"number", pr.Number,
+					"url", pr.URL,
+					"pr_updated_at", pr.UpdatedAt.Format(time.RFC3339),
+					"firstBlockedAt", state.FirstBlockedAt.Format(time.RFC3339),
+					"inGracePeriod", inGracePeriod)
+
+				// Should we notify for actual state transitions?
+				if !inGracePeriod && !state.HasNotified {
+					slog.Debug("[STATE] Will notify for newly blocked PR", "repo", pr.Repository, "number", pr.Number)
+					toNotify = append(toNotify, pr)
+					state.HasNotified = true
+				} else if inGracePeriod {
+					slog.Debug("[STATE] In grace period, not notifying", "repo", pr.Repository, "number", pr.Number)
+				}
 			}
 		} else {
-			// PR was already blocked
+			// PR was already blocked in our state - just update data, preserve FirstBlockedAt
+			originalFirstBlocked := state.FirstBlockedAt
 			state.LastSeenBlocked = now
 			state.PR = pr // Update PR data
 
+			slog.Debug("[STATE] State transition: blocked -> blocked (no change)",
+				"repo", pr.Repository, "number", pr.Number, "url", pr.URL,
+				"original_first_blocked", originalFirstBlocked.Format(time.RFC3339),
+				"time_since_first_blocked", time.Since(originalFirstBlocked).Round(time.Second),
+				"has_notified", state.HasNotified)
+
 			// If we haven't notified yet and we're past grace period, notify now
-			if !state.HasNotified && !inGracePeriod {
+			// But don't notify for initial discovery PRs
+			if !state.HasNotified && !inGracePeriod && !state.IsInitialDiscovery {
 				slog.Info("[STATE] Past grace period, notifying for previously blocked PR",
 					"repo", pr.Repository, "number", pr.Number)
 				toNotify = append(toNotify, pr)
@@ -108,11 +152,24 @@ func (m *PRStateManager) UpdatePRs(incoming, outgoing []PR, hiddenOrgs map[strin
 	}
 
 	// Clean up states for PRs that are no longer in our lists
-	for url := range m.states {
+	// Add more conservative cleanup with logging
+	removedCount := 0
+	for url, state := range m.states {
 		if !currentlyBlocked[url] {
-			slog.Debug("[STATE] Removing stale state for PR", "url", url)
+			timeSinceLastSeen := time.Since(state.LastSeenBlocked)
+			slog.Info("[STATE] Removing stale PR state (no longer blocked)",
+				"url", url, "repo", state.PR.Repository, "number", state.PR.Number,
+				"first_blocked_at", state.FirstBlockedAt.Format(time.RFC3339),
+				"last_seen_blocked", state.LastSeenBlocked.Format(time.RFC3339),
+				"time_since_last_seen", timeSinceLastSeen.Round(time.Second),
+				"was_notified", state.HasNotified)
 			delete(m.states, url)
+			removedCount++
 		}
+	}
+
+	if removedCount > 0 {
+		slog.Info("[STATE] State cleanup completed", "removed_states", removedCount, "remaining_states", len(m.states))
 	}
 
 	return toNotify
