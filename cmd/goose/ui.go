@@ -110,10 +110,13 @@ func (app *App) countPRs() PRCounts {
 	now := time.Now()
 	staleThreshold := now.Add(-stalePRThreshold)
 
+	slog.Info("[MENU] Counting incoming PRs", "total_incoming", len(app.incoming))
+	filteredIncoming := 0
 	for i := range app.incoming {
 		// Check if org is hidden
 		org := extractOrgFromRepo(app.incoming[i].Repository)
 		if org != "" && app.hiddenOrgs[org] {
+			filteredIncoming++
 			continue
 		}
 
@@ -122,23 +125,65 @@ func (app *App) countPRs() PRCounts {
 			if app.incoming[i].NeedsReview {
 				incomingBlocked++
 			}
+		} else {
+			filteredIncoming++
 		}
 	}
+	slog.Info("[MENU] Incoming PR count results",
+		"total_before_filter", len(app.incoming),
+		"total_after_filter", incomingCount,
+		"filtered_out", filteredIncoming,
+		"blocked_count", incomingBlocked)
 
+	slog.Info("[MENU] Counting outgoing PRs",
+		"total_outgoing", len(app.outgoing),
+		"hideStaleIncoming", app.hideStaleIncoming,
+		"staleThreshold", staleThreshold.Format(time.RFC3339))
 	for i := range app.outgoing {
+		pr := app.outgoing[i]
 		// Check if org is hidden
-		org := extractOrgFromRepo(app.outgoing[i].Repository)
-		if org != "" && app.hiddenOrgs[org] {
+		org := extractOrgFromRepo(pr.Repository)
+		hiddenByOrg := org != "" && app.hiddenOrgs[org]
+		isStale := pr.UpdatedAt.Before(staleThreshold)
+
+		// Log every PR with its filtering status
+		slog.Info("[MENU] Processing outgoing PR",
+			"repo", pr.Repository,
+			"number", pr.Number,
+			"org", org,
+			"hidden_org", hiddenByOrg,
+			"updated_at", pr.UpdatedAt.Format(time.RFC3339),
+			"is_stale", isStale,
+			"hideStale_enabled", app.hideStaleIncoming,
+			"blocked", pr.IsBlocked,
+			"url", pr.URL)
+
+		if hiddenByOrg {
+			slog.Info("[MENU] ❌ Filtering out outgoing PR (hidden org)",
+				"repo", pr.Repository, "number", pr.Number,
+				"org", org, "url", pr.URL)
 			continue
 		}
 
-		if !app.hideStaleIncoming || app.outgoing[i].UpdatedAt.After(staleThreshold) {
+		if !app.hideStaleIncoming || !isStale {
 			outgoingCount++
-			if app.outgoing[i].IsBlocked {
+			if pr.IsBlocked {
 				outgoingBlocked++
 			}
+			slog.Info("[MENU] ✅ Including outgoing PR in count",
+				"repo", pr.Repository, "number", pr.Number,
+				"blocked", pr.IsBlocked, "url", pr.URL)
+		} else {
+			slog.Info("[MENU] ❌ Filtering out outgoing PR (stale)",
+				"repo", pr.Repository, "number", pr.Number,
+				"updated_at", pr.UpdatedAt.Format(time.RFC3339),
+				"url", pr.URL)
 		}
 	}
+	slog.Info("[MENU] Outgoing PR count results",
+		"total_before_filter", len(app.outgoing),
+		"total_after_filter", outgoingCount,
+		"blocked_count", outgoingBlocked)
 	return PRCounts{
 		IncomingTotal:   incomingCount,
 		IncomingBlocked: incomingBlocked,
@@ -176,7 +221,12 @@ func (app *App) setTrayTitle() {
 
 // addPRSection adds a section of PRs to the menu.
 func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string, blockedCount int) {
+	slog.Debug("[MENU] addPRSection called",
+		"section", sectionTitle,
+		"pr_count", len(prs),
+		"blocked_count", blockedCount)
 	if len(prs) == 0 {
+		slog.Debug("[MENU] No PRs to add in section", "section", sectionTitle)
 		return
 	}
 
@@ -211,35 +261,55 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	app.mu.RUnlock()
 
 	// Add PR items in sorted order
+	itemsAdded := 0
 	for prIndex := range sortedPRs {
 		// Apply filters
 		// Skip PRs from hidden orgs
 		org := extractOrgFromRepo(sortedPRs[prIndex].Repository)
 		if org != "" && hiddenOrgs[org] {
+			slog.Debug("[MENU] Skipping PR in addPRSection (hidden org)",
+				"section", sectionTitle,
+				"repo", sortedPRs[prIndex].Repository,
+				"number", sortedPRs[prIndex].Number,
+				"org", org)
 			continue
 		}
 
 		// Skip stale PRs if configured
 		if hideStale && sortedPRs[prIndex].UpdatedAt.Before(time.Now().Add(-stalePRThreshold)) {
+			slog.Debug("[MENU] Skipping PR in addPRSection (stale)",
+				"section", sectionTitle,
+				"repo", sortedPRs[prIndex].Repository,
+				"number", sortedPRs[prIndex].Number,
+				"updated_at", sortedPRs[prIndex].UpdatedAt)
 			continue
 		}
 
 		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
-		// Add bullet point or emoji for blocked PRs
+
+		// Add action code if present
+		if sortedPRs[prIndex].ActionKind != "" {
+			title = fmt.Sprintf("%s — %s", title, sortedPRs[prIndex].ActionKind)
+		}
+
+		// Add bullet point or emoji based on PR status
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			// Get the blocked time from state manager
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
-			// Show emoji for PRs blocked within the last 5 minutes
-			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
+			// Show emoji for PRs blocked within the last 5 minutes (but only for real state transitions, not initial discoveries)
+			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration && !prState.IsInitialDiscovery {
 				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				// Use party popper for outgoing PRs, goose for incoming PRs
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
-					slog.Debug("[MENU] Adding party popper to outgoing PR",
+					slog.Info("[MENU] Adding party popper to outgoing PR",
+						"repo", sortedPRs[prIndex].Repository,
+						"number", sortedPRs[prIndex].Number,
 						"url", sortedPRs[prIndex].URL,
-						"blocked_ago", timeSinceBlocked,
-						"remaining", blockedPRIconDuration-timeSinceBlocked)
+						"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+						"blocked_ago", timeSinceBlocked.Round(time.Second),
+						"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
 					slog.Debug("[MENU] Adding goose to incoming PR",
@@ -248,8 +318,9 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 						"remaining", blockedPRIconDuration-timeSinceBlocked)
 				}
 			} else {
-				title = fmt.Sprintf("• %s", title)
-				// Log when we transition from emoji to bullet point
+				// Use block/square icon for blocked PRs
+				title = fmt.Sprintf("■ %s", title)
+				// Log when we transition from emoji to block icon
 				if hasState && !prState.FirstBlockedAt.IsZero() {
 					timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 					if sectionTitle == "Outgoing" {
@@ -265,6 +336,9 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 					}
 				}
 			}
+		} else if sortedPRs[prIndex].ActionKind != "" {
+			// PR has an action but isn't blocked - add bullet to indicate it could use input
+			title = fmt.Sprintf("• %s", title)
 		}
 		// Format age inline for tooltip
 		duration := time.Since(sortedPRs[prIndex].UpdatedAt)
@@ -288,6 +362,14 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		}
 
 		// Create PR menu item
+		itemsAdded++
+		slog.Debug("[MENU] Adding PR to menu",
+			"section", sectionTitle,
+			"title", title,
+			"repo", sortedPRs[prIndex].Repository,
+			"number", sortedPRs[prIndex].Number,
+			"url", sortedPRs[prIndex].URL,
+			"blocked", sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked)
 		item := app.systrayInterface.AddMenuItem(title, tooltip)
 
 		// Capture URL and action to avoid loop variable capture bug
@@ -299,6 +381,10 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 			}
 		})
 	}
+	slog.Info("[MENU] Added PR section",
+		"section", sectionTitle,
+		"items_added", itemsAdded,
+		"filtered_out", len(sortedPRs)-itemsAdded)
 }
 
 // generateMenuTitles generates the list of menu item titles that would be shown
@@ -387,19 +473,55 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 
 		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
 
+		// Add action code if present
+		if sortedPRs[prIndex].ActionKind != "" {
+			title = fmt.Sprintf("%s — %s", title, sortedPRs[prIndex].ActionKind)
+		}
+
 		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
-			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration {
+			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration && !prState.IsInitialDiscovery {
+				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)
+					slog.Info("[MENU] Adding party popper to outgoing PR in generateMenuTitles",
+						"repo", sortedPRs[prIndex].Repository,
+						"number", sortedPRs[prIndex].Number,
+						"url", sortedPRs[prIndex].URL,
+						"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+						"blocked_ago", timeSinceBlocked.Round(time.Second),
+						"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
+					slog.Debug("[MENU] Adding goose to incoming PR in generateMenuTitles",
+						"url", sortedPRs[prIndex].URL,
+						"blocked_ago", timeSinceBlocked,
+						"remaining", blockedPRIconDuration-timeSinceBlocked)
 				}
 			} else {
-				title = fmt.Sprintf("• %s", title)
+				// Use block/square icon for blocked PRs
+				title = fmt.Sprintf("■ %s", title)
+				// Log when we use block icon instead of emoji
+				if hasState && !prState.FirstBlockedAt.IsZero() {
+					timeSinceBlocked := time.Since(prState.FirstBlockedAt)
+					if sectionTitle == "Outgoing" {
+						slog.Debug("[MENU] Using block icon instead of party popper in generateMenuTitles",
+							"url", sortedPRs[prIndex].URL,
+							"blocked_ago", timeSinceBlocked.Round(time.Second),
+							"icon_duration", blockedPRIconDuration)
+					}
+				} else if !hasState {
+					slog.Debug("[MENU] No state found for blocked PR, using block icon",
+						"url", sortedPRs[prIndex].URL,
+						"repo", sortedPRs[prIndex].Repository,
+						"number", sortedPRs[prIndex].Number)
+				}
 			}
+		} else if sortedPRs[prIndex].ActionKind != "" {
+			// PR has an action but isn't blocked - add bullet to indicate it could use input
+			title = fmt.Sprintf("• %s", title)
 		}
 
 		titles = append(titles, title)
@@ -570,11 +692,17 @@ func (app *App) rebuildMenu(ctx context.Context) {
 		app.systrayInterface.AddSeparator()
 
 		// Outgoing section
+		slog.Info("[MENU] Building outgoing section",
+			"total_count", counts.OutgoingTotal,
+			"blocked_count", counts.OutgoingBlocked)
 		if counts.OutgoingTotal > 0 {
 			app.mu.RLock()
 			outgoing := app.outgoing
 			app.mu.RUnlock()
+			slog.Debug("[MENU] Outgoing PRs to add", "count", len(outgoing))
 			app.addPRSection(ctx, outgoing, "Outgoing", counts.OutgoingBlocked)
+		} else {
+			slog.Info("[MENU] No outgoing PRs to display after filtering")
 		}
 	}
 
