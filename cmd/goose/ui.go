@@ -193,23 +193,46 @@ func (app *App) setTrayTitle() {
 	// Set title and icon based on PR state
 	var title string
 	var iconType IconType
-	switch {
-	case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
-		title = ""
-		iconType = IconSmiling
-	case counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0:
-		title = fmt.Sprintf("%d / %d", counts.IncomingBlocked, counts.OutgoingBlocked)
-		iconType = IconBoth
-	case counts.IncomingBlocked > 0:
-		title = fmt.Sprintf("%d", counts.IncomingBlocked)
-		iconType = IconGoose
-	default:
-		title = fmt.Sprintf("%d", counts.OutgoingBlocked)
-		iconType = IconPopper
+
+	// On Linux, always show counts if there are any PRs
+	// This helps since not all desktop environments show the text
+	if runtime.GOOS == "linux" && (counts.IncomingTotal > 0 || counts.OutgoingTotal > 0) {
+		// Show blocked/total format for better visibility
+		if counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0 {
+			title = fmt.Sprintf("%d/%d • %d/%d", counts.IncomingBlocked, counts.IncomingTotal, counts.OutgoingBlocked, counts.OutgoingTotal)
+			iconType = IconBoth
+		} else if counts.IncomingBlocked > 0 {
+			title = fmt.Sprintf("%d/%d", counts.IncomingBlocked, counts.IncomingTotal)
+			iconType = IconGoose
+		} else if counts.OutgoingBlocked > 0 {
+			title = fmt.Sprintf("%d/%d", counts.OutgoingBlocked, counts.OutgoingTotal)
+			iconType = IconPopper
+		} else {
+			// No blocked PRs but there are PRs
+			title = fmt.Sprintf("0/%d", counts.IncomingTotal+counts.OutgoingTotal)
+			iconType = IconSmiling
+		}
+	} else {
+		// Original behavior for other platforms
+		switch {
+		case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
+			title = ""
+			iconType = IconSmiling
+		case counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0:
+			title = fmt.Sprintf("%d / %d", counts.IncomingBlocked, counts.OutgoingBlocked)
+			iconType = IconBoth
+		case counts.IncomingBlocked > 0:
+			title = fmt.Sprintf("%d", counts.IncomingBlocked)
+			iconType = IconGoose
+		default:
+			title = fmt.Sprintf("%d", counts.OutgoingBlocked)
+			iconType = IconPopper
+		}
 	}
 
 	// Log title change with detailed counts
-	slog.Debug("[TRAY] Setting title and icon",
+	slog.Info("[TRAY] Setting title and icon",
+		"os", runtime.GOOS,
 		"title", title,
 		"icon", iconType,
 		"incoming_total", counts.IncomingTotal,
@@ -533,9 +556,17 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 // rebuildMenu completely rebuilds the menu from scratch.
 func (app *App) rebuildMenu(ctx context.Context) {
 	// Rebuild entire menu
+	slog.Info("[MENU] Starting rebuildMenu", "os", runtime.GOOS)
 
 	// Clear all existing menu items
 	app.systrayInterface.ResetMenu()
+	slog.Info("[MENU] Called ResetMenu")
+
+	// On Linux, add a small delay to ensure DBus properly processes the reset
+	// This helps prevent menu item duplication
+	if runtime.GOOS == "linux" {
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	// Check for errors (auth or connection failures)
 	app.mu.RLock()

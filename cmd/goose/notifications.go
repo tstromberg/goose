@@ -95,12 +95,7 @@ func (app *App) processNotifications(ctx context.Context) {
 			slog.Debug("[NOTIFY] Updating menu after notifications")
 			app.updateMenu(ctx)
 		}
-
-		// Auto-open if enabled
-		if app.enableAutoBrowser && time.Since(app.startTime) > startupGracePeriod {
-			app.tryAutoOpenPR(ctx, pr, app.enableAutoBrowser, app.startTime)
-		}
-	}
+	}()
 
 	// Update menu if we sent notifications
 	if len(toNotify) > 0 {

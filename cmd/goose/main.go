@@ -331,7 +331,31 @@ func (app *App) onReady(ctx context.Context) {
 					app.mu.Unlock()
 
 					// Load current user
-					loadCurrentUser(ctx, app)
+					if app.client != nil {
+						var user *github.User
+						err := retry.Do(func() error {
+							var retryErr error
+							user, _, retryErr = app.client.Users.Get(ctx, "")
+							if retryErr != nil {
+								slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
+								return retryErr
+							}
+							return nil
+						},
+							retry.Attempts(maxRetries),
+							retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)),
+							retry.MaxDelay(maxRetryDelay),
+							retry.OnRetry(func(n uint, err error) {
+								slog.Debug("[RETRY] Retrying GitHub API call", "attempt", n, "error", err)
+							}),
+						)
+						if err == nil && user != nil {
+							if app.targetUser == "" {
+								app.targetUser = user.GetLogin()
+								slog.Info("Set target user to current user", "user", app.targetUser)
+							}
+						}
+					}
 
 					// Update tooltip
 					tooltip := "Goose - Loading PRs..."

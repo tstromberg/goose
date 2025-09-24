@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log/slog"
+
 	"github.com/energye/systray"
 )
 
@@ -19,10 +21,12 @@ type SystrayInterface interface {
 type RealSystray struct{}
 
 func (*RealSystray) ResetMenu() {
+	slog.Debug("[SYSTRAY] ResetMenu called")
 	systray.ResetMenu()
 }
 
 func (*RealSystray) AddMenuItem(title, tooltip string) MenuItem {
+	slog.Debug("[SYSTRAY] AddMenuItem called", "title", title)
 	item := systray.AddMenuItem(title, tooltip)
 	return &RealMenuItem{MenuItem: item}
 }
@@ -32,6 +36,7 @@ func (*RealSystray) AddSeparator() {
 }
 
 func (*RealSystray) SetTitle(title string) {
+	slog.Info("[SYSTRAY] SetTitle called", "title", title, "len", len(title))
 	systray.SetTitle(title)
 }
 
