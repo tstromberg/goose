@@ -308,9 +308,14 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 
 		title := fmt.Sprintf("%s #%d", sortedPRs[prIndex].Repository, sortedPRs[prIndex].Number)
 
-		// Add action code if present
+		// Add action code if present, or test state as fallback
 		if sortedPRs[prIndex].ActionKind != "" {
-			title = fmt.Sprintf("%s — %s", title, sortedPRs[prIndex].ActionKind)
+			// Replace underscores with spaces for better readability
+			actionDisplay := strings.ReplaceAll(sortedPRs[prIndex].ActionKind, "_", " ")
+			title = fmt.Sprintf("%s — %s", title, actionDisplay)
+		} else if sortedPRs[prIndex].TestState == "running" {
+			// Show "tests running" as a fallback when no specific action is available
+			title = fmt.Sprintf("%s — tests running", title)
 		}
 
 		// Add bullet point or emoji based on PR status

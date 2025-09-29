@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -110,6 +111,17 @@ func TestMenuItemTitleTransition(t *testing.T) {
 		// This simulates what addPRSection does when building menu items
 		for _, pr := range app.incoming {
 			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
+
+			// Add action code if present, or test state as fallback
+			if pr.ActionKind != "" {
+				// Replace underscores with spaces for better readability
+				actionDisplay := strings.ReplaceAll(pr.ActionKind, "_", " ")
+				title = fmt.Sprintf("%s — %s", title, actionDisplay)
+			} else if pr.TestState == "running" {
+				// Show "tests running" as a fallback when no specific action is available
+				title = fmt.Sprintf("%s — tests running", title)
+			}
+
 			if pr.NeedsReview {
 				if !pr.FirstBlockedAt.IsZero() && time.Since(pr.FirstBlockedAt) < testBlockDuration {
 					title = fmt.Sprintf("🪿 %s", title)
@@ -122,6 +134,17 @@ func TestMenuItemTitleTransition(t *testing.T) {
 
 		for _, pr := range app.outgoing {
 			title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
+
+			// Add action code if present, or test state as fallback
+			if pr.ActionKind != "" {
+				// Replace underscores with spaces for better readability
+				actionDisplay := strings.ReplaceAll(pr.ActionKind, "_", " ")
+				title = fmt.Sprintf("%s — %s", title, actionDisplay)
+			} else if pr.TestState == "running" {
+				// Show "tests running" as a fallback when no specific action is available
+				title = fmt.Sprintf("%s — tests running", title)
+			}
+
 			if pr.IsBlocked {
 				if !pr.FirstBlockedAt.IsZero() && time.Since(pr.FirstBlockedAt) < testBlockDuration {
 					title = fmt.Sprintf("🎉 %s", title)
