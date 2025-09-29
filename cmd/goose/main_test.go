@@ -119,7 +119,7 @@ func TestMenuItemTitleTransition(t *testing.T) {
 				title = fmt.Sprintf("%s — %s", title, actionDisplay)
 			} else if pr.TestState == "running" {
 				// Show "tests running" as a fallback when no specific action is available
-				title = fmt.Sprintf("%s — tests running", title)
+				title = fmt.Sprintf("%s — tests running...", title)
 			}
 
 			if pr.NeedsReview {
@@ -142,7 +142,7 @@ func TestMenuItemTitleTransition(t *testing.T) {
 				title = fmt.Sprintf("%s — %s", title, actionDisplay)
 			} else if pr.TestState == "running" {
 				// Show "tests running" as a fallback when no specific action is available
-				title = fmt.Sprintf("%s — tests running", title)
+				title = fmt.Sprintf("%s — tests running...", title)
 			}
 
 			if pr.IsBlocked {

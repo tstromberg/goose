@@ -315,7 +315,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 			title = fmt.Sprintf("%s — %s", title, actionDisplay)
 		} else if sortedPRs[prIndex].TestState == "running" {
 			// Show "tests running" as a fallback when no specific action is available
-			title = fmt.Sprintf("%s — tests running", title)
+			title = fmt.Sprintf("%s — tests running...", title)
 		}
 
 		// Add bullet point or emoji based on PR status
