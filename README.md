@@ -21,6 +21,7 @@ Lives in your menubar like a tiny waterfowl of productivity shame, watching your
 - **Auto-start** on login (macOS)
 - **Auto-open** incoming PRs in your browser (off by default, rate-limited)
 - **Org Filtering** for orgs you may not care about in a home or work context
+* **Multi-platform** support for Linux, macOS, Windows, FreeBSD, whatever.
 
 You can also visit the web-based dashboard at https://dash.ready-to-review.dev/
 
@@ -70,9 +71,6 @@ We don't yet persist fine-grained tokens to disk - PR's welcome!
 ## Known Issues
 
 - Visual notifications won't work on macOS until we release signed binaries.
-- Blocking turn logic isn't 100% accurate - open an issue if you find something.
-- The goose may not stop honking until you review your PRs
-- Linux, BSD, and Windows support is implemented but untested
 
 ## Pricing
 
