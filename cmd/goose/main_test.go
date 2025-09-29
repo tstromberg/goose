@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -196,8 +197,15 @@ func TestTrayIconRestoredAfterNetworkRecovery(t *testing.T) {
 	}
 	app.setTrayTitle()
 	initialTitle := mock.title
-	if initialTitle != "🪿 1" {
-		t.Errorf("Expected initial tray title '🪿 1', got %q", initialTitle)
+
+	// Expected title varies by platform
+	expectedTitle := "" // Most platforms: icon only, no text
+	if runtime.GOOS == "darwin" {
+		expectedTitle = "1" // macOS: show count with icon
+	}
+
+	if initialTitle != expectedTitle {
+		t.Errorf("Expected initial tray title %q, got %q", expectedTitle, initialTitle)
 	}
 
 	// Simulate network failure - updatePRs would set warning icon and return early
@@ -213,8 +221,8 @@ func TestTrayIconRestoredAfterNetworkRecovery(t *testing.T) {
 	// With our fix, setTrayTitle() is now called after successful fetch
 	app.setTrayTitle()
 	recoveredTitle := mock.title
-	if recoveredTitle != "🪿 1" {
-		t.Errorf("Expected tray title to be restored to '🪿 1' after recovery, got %q", recoveredTitle)
+	if recoveredTitle != expectedTitle {
+		t.Errorf("Expected tray title to be restored to %q after recovery, got %q", expectedTitle, recoveredTitle)
 	}
 }
 
@@ -242,7 +250,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 			name:          "no PRs",
 			incoming:      []PR{},
 			outgoing:      []PR{},
-			expectedTitle: "😊",
+			expectedTitle: "", // No count shown when no blocked PRs
 		},
 		{
 			name: "only incoming blocked",
@@ -251,7 +259,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 				{Repository: "test/repo", Number: 2, NeedsReview: true, UpdatedAt: time.Now()},
 			},
 			outgoing:      []PR{},
-			expectedTitle: "🪿 2",
+			expectedTitle: "2", // macOS format: just the count
 		},
 		{
 			name:     "only outgoing blocked",
@@ -261,7 +269,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 				{Repository: "test/repo", Number: 4, IsBlocked: true, UpdatedAt: time.Now()},
 				{Repository: "test/repo", Number: 5, IsBlocked: true, UpdatedAt: time.Now()},
 			},
-			expectedTitle: "🎉 3",
+			expectedTitle: "3", // macOS format: just the count
 		},
 		{
 			name: "both incoming and outgoing blocked",
@@ -271,7 +279,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 			outgoing: []PR{
 				{Repository: "test/repo", Number: 2, IsBlocked: true, UpdatedAt: time.Now()},
 			},
-			expectedTitle: "🪿 1 🎉 1",
+			expectedTitle: "1 / 1", // macOS format: "incoming / outgoing"
 		},
 		{
 			name: "mixed blocked and unblocked",
@@ -283,7 +291,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 				{Repository: "test/repo", Number: 3, IsBlocked: false, UpdatedAt: time.Now()},
 				{Repository: "test/repo", Number: 4, IsBlocked: true, UpdatedAt: time.Now()},
 			},
-			expectedTitle: "🪿 1 🎉 1",
+			expectedTitle: "1 / 1", // macOS format: "incoming / outgoing"
 		},
 		{
 			name: "hidden org filters out blocked PRs",
@@ -293,7 +301,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 			},
 			outgoing:      []PR{},
 			hiddenOrgs:    map[string]bool{"hidden-org": true},
-			expectedTitle: "🪿 1",
+			expectedTitle: "1", // macOS format: just the count
 		},
 		{
 			name: "stale PRs filtered when hideStaleIncoming is true",
@@ -303,7 +311,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 			},
 			outgoing:          []PR{},
 			hideStaleIncoming: true,
-			expectedTitle:     "🪿 1",
+			expectedTitle:     "1", // macOS format: just the count
 		},
 	}
 
@@ -314,22 +322,19 @@ func TestTrayTitleUpdates(t *testing.T) {
 			app.hiddenOrgs = tt.hiddenOrgs
 			app.hideStaleIncoming = tt.hideStaleIncoming
 
-			// Get the title that would be set
-			counts := app.countPRs()
-			var title string
-			switch {
-			case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
-				title = "😊"
-			case counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0:
-				title = fmt.Sprintf("🪿 %d 🎉 %d", counts.IncomingBlocked, counts.OutgoingBlocked)
-			case counts.IncomingBlocked > 0:
-				title = fmt.Sprintf("🪿 %d", counts.IncomingBlocked)
-			default:
-				title = fmt.Sprintf("🎉 %d", counts.OutgoingBlocked)
+			// Call setTrayTitle to get the actual title
+			app.setTrayTitle()
+			actualTitle := app.systrayInterface.(*MockSystray).title
+
+			// Adjust expected title based on platform
+			expectedTitle := tt.expectedTitle
+			if runtime.GOOS != "darwin" {
+				// Non-macOS platforms show icon only (no text)
+				expectedTitle = ""
 			}
 
-			if title != tt.expectedTitle {
-				t.Errorf("Expected tray title %q, got %q", tt.expectedTitle, title)
+			if actualTitle != expectedTitle {
+				t.Errorf("Expected tray title %q, got %q", expectedTitle, actualTitle)
 			}
 		})
 	}
@@ -447,15 +452,19 @@ func TestSoundPlaybackDuringTransitions(t *testing.T) {
 			// Actual sound playback is verified through integration testing.
 
 			// Set initial state
+			app.mu.Lock()
 			app.incoming = tt.initialIncoming
 			app.outgoing = tt.initialOutgoing
+			app.mu.Unlock()
 
 			// Run first check to establish baseline
 			app.checkForNewlyBlockedPRs(ctx)
 
 			// Update to new state
+			app.mu.Lock()
 			app.incoming = tt.updatedIncoming
 			app.outgoing = tt.updatedOutgoing
+			app.mu.Unlock()
 
 			// Run check again to detect transitions
 			app.checkForNewlyBlockedPRs(ctx)
@@ -465,6 +474,7 @@ func TestSoundPlaybackDuringTransitions(t *testing.T) {
 			if len(tt.expectedSounds) > 0 {
 				// Check that blocked PRs are tracked in previousBlockedPRs
 				blocked := 0
+				app.mu.RLock()
 				for _, pr := range app.incoming {
 					if pr.NeedsReview && app.previousBlockedPRs[pr.URL] {
 						blocked++
@@ -475,6 +485,7 @@ func TestSoundPlaybackDuringTransitions(t *testing.T) {
 						blocked++
 					}
 				}
+				app.mu.RUnlock()
 				if blocked == 0 {
 					t.Errorf("%s: expected blocked PRs to be tracked in previousBlockedPRs", tt.description)
 				}
