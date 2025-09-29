@@ -25,6 +25,8 @@ type cacheEntry struct {
 
 // turnData fetches Turn API data with caching.
 func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, bool, error) {
+	prAge := time.Since(updatedAt)
+	hasRunningTests := false
 	// Validate URL before processing
 	if err := validateURL(url); err != nil {
 		return nil, false, fmt.Errorf("invalid URL: %w", err)
@@ -55,15 +57,26 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 				}
 			} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
 				// Check if cache is still valid (10 day TTL, but PR UpdatedAt is primary check)
-				slog.Debug("[CACHE] Cache hit",
-					"url", url,
-					"cached_at", entry.CachedAt.Format(time.RFC3339),
-					"cache_age", time.Since(entry.CachedAt).Round(time.Second),
-					"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339))
-				if app.healthMonitor != nil {
-					app.healthMonitor.recordCacheAccess(true)
+				// But invalidate cache for PRs with running tests if they're fresh (< 90 minutes old)
+				if entry.Data != nil && entry.Data.PullRequest.TestState == "running" && prAge < runningTestsCacheBypass {
+					hasRunningTests = true
+					slog.Debug("[CACHE] Cache invalidated - PR has running tests and is fresh",
+						"url", url,
+						"test_state", entry.Data.PullRequest.TestState,
+						"pr_age", prAge.Round(time.Minute),
+						"cached_at", entry.CachedAt.Format(time.RFC3339))
+					// Don't return cached data - fall through to fetch fresh data with current time
+				} else {
+					slog.Debug("[CACHE] Cache hit",
+						"url", url,
+						"cached_at", entry.CachedAt.Format(time.RFC3339),
+						"cache_age", time.Since(entry.CachedAt).Round(time.Second),
+						"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339))
+					if app.healthMonitor != nil {
+						app.healthMonitor.recordCacheAccess(true)
+					}
+					return entry.Data, true, nil
 				}
-				return entry.Data, true, nil
 			} else {
 				// Log why cache was invalid
 				if !entry.UpdatedAt.Equal(updatedAt) {
@@ -103,12 +116,22 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		turnCtx, cancel := context.WithTimeout(ctx, turnAPITimeout)
 		defer cancel()
 
+		// For PRs with running tests, send current time to bypass Turn server cache
+		timestampToSend := updatedAt
+		if hasRunningTests {
+			timestampToSend = time.Now()
+			slog.Debug("[TURN] Using current timestamp for PR with running tests to bypass Turn server cache",
+				"url", url,
+				"pr_updated_at", updatedAt.Format(time.RFC3339),
+				"timestamp_sent", timestampToSend.Format(time.RFC3339))
+		}
+
 		var retryErr error
 		slog.Debug("[TURN] Making API call",
 			"url", url,
 			"user", app.currentUser.GetLogin(),
-			"pr_updated_at", updatedAt.Format(time.RFC3339))
-		data, retryErr = app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), updatedAt)
+			"pr_updated_at", timestampToSend.Format(time.RFC3339))
+		data, retryErr = app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), timestampToSend)
 		if retryErr != nil {
 			slog.Warn("Turn API error (will retry)", "error", retryErr)
 			return retryErr
@@ -137,26 +160,42 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	}
 
 	// Save to cache (don't fail if caching fails) - skip if --no-cache is set
+	// Also skip caching if tests are running and PR is fresh (updated in last 90 minutes)
 	if !app.noCache {
-		entry := cacheEntry{
-			Data:      data,
-			CachedAt:  time.Now(),
-			UpdatedAt: updatedAt,
+		shouldCache := true
+		prAge := time.Since(updatedAt)
+
+		// Don't cache PRs with running tests unless they're older than 90 minutes
+		if data != nil && data.PullRequest.TestState == "running" && prAge < runningTestsCacheBypass {
+			shouldCache = false
+			slog.Debug("[CACHE] Skipping cache for PR with running tests",
+				"url", url,
+				"test_state", data.PullRequest.TestState,
+				"pr_age", prAge.Round(time.Minute),
+				"pending_checks", len(data.PullRequest.CheckSummary.PendingStatuses))
 		}
-		if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
-			slog.Error("Failed to marshal cache data", "url", url, "error", marshalErr)
-		} else {
-			// Ensure cache directory exists with secure permissions
-			if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
-				slog.Error("Failed to create cache directory", "error", dirErr)
-			} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
-				slog.Error("Failed to write cache file", "error", writeErr)
+
+		if shouldCache {
+			entry := cacheEntry{
+				Data:      data,
+				CachedAt:  time.Now(),
+				UpdatedAt: updatedAt,
+			}
+			if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
+				slog.Error("Failed to marshal cache data", "url", url, "error", marshalErr)
 			} else {
-				slog.Debug("[CACHE] Saved to cache",
-					"url", url,
-					"cached_at", entry.CachedAt.Format(time.RFC3339),
-					"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339),
-					"cache_file", filepath.Base(cacheFile))
+				// Ensure cache directory exists with secure permissions
+				if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
+					slog.Error("Failed to create cache directory", "error", dirErr)
+				} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
+					slog.Error("Failed to write cache file", "error", writeErr)
+				} else {
+					slog.Debug("[CACHE] Saved to cache",
+						"url", url,
+						"cached_at", entry.CachedAt.Format(time.RFC3339),
+						"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339),
+						"cache_file", filepath.Base(cacheFile))
+				}
 			}
 		}
 	}

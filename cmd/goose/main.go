@@ -34,6 +34,7 @@ const (
 	cacheTTL                  = 10 * 24 * time.Hour // 10 days - rely mostly on PR UpdatedAt
 	cacheCleanupInterval      = 15 * 24 * time.Hour // 15 days - cleanup older than cache TTL
 	stalePRThreshold          = 90 * 24 * time.Hour
+	runningTestsCacheBypass   = 90 * time.Minute // Don't cache PRs with running tests if fresher than this
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
 	defaultUpdateInterval     = 1 * time.Minute
@@ -46,7 +47,7 @@ const (
 	turnAPITimeout            = 10 * time.Second
 	maxConcurrentTurnAPICalls = 20
 	defaultMaxBrowserOpensDay = 20
-	startupGracePeriod        = 1 * time.Minute  // Don't play sounds or auto-open for first minute
+	startupGracePeriod        = 1 * time.Minute // Don't play sounds or auto-open for first minute
 )
 
 // PR represents a pull request with metadata.
@@ -60,6 +61,7 @@ type PR struct {
 	Author            string // GitHub username of the PR author
 	ActionReason      string
 	ActionKind        string // The kind of action expected (review, merge, fix_tests, etc.)
+	TestState         string // Test state from Turn API: "running", "passing", "failing", etc.
 	Number            int
 	IsDraft           bool
 	IsBlocked         bool
@@ -68,39 +70,39 @@ type PR struct {
 
 // App holds the application state.
 type App struct {
-	lastSearchAttempt   time.Time
-	lastSuccessfulFetch time.Time
-	startTime           time.Time
-	systrayInterface    SystrayInterface
-	browserRateLimiter  *BrowserRateLimiter
-	blockedPRTimes      map[string]time.Time
-	currentUser         *github.User
-	stateManager        *PRStateManager
-	client              *github.Client
-	hiddenOrgs          map[string]bool
-	seenOrgs            map[string]bool
-	turnClient          *turn.Client
-	previousBlockedPRs  map[string]bool
-	authError           string
-	lastFetchError      string
-	cacheDir            string
-	targetUser          string
-	lastMenuTitles      []string
-	outgoing            []PR
-	incoming            []PR
-	updateInterval      time.Duration
-	consecutiveFailures int
-	mu                  sync.RWMutex
-	menuMutex           sync.Mutex // Mutex to prevent concurrent menu rebuilds
-	enableAutoBrowser   bool
-	hideStaleIncoming   bool
+	lastSearchAttempt            time.Time
+	lastSuccessfulFetch          time.Time
+	startTime                    time.Time
+	systrayInterface             SystrayInterface
+	browserRateLimiter           *BrowserRateLimiter
+	blockedPRTimes               map[string]time.Time
+	currentUser                  *github.User
+	stateManager                 *PRStateManager
+	client                       *github.Client
+	hiddenOrgs                   map[string]bool
+	seenOrgs                     map[string]bool
+	turnClient                   *turn.Client
+	previousBlockedPRs           map[string]bool
+	authError                    string
+	lastFetchError               string
+	cacheDir                     string
+	targetUser                   string
+	lastMenuTitles               []string
+	outgoing                     []PR
+	incoming                     []PR
+	updateInterval               time.Duration
+	consecutiveFailures          int
+	mu                           sync.RWMutex
+	menuMutex                    sync.Mutex // Mutex to prevent concurrent menu rebuilds
+	enableAutoBrowser            bool
+	hideStaleIncoming            bool
 	hasPerformedInitialDiscovery bool // Track if we've done the first poll to distinguish from real state changes
-	noCache             bool
-	enableAudioCues     bool
-	initialLoadComplete bool
-	menuInitialized     bool
-	healthMonitor       *healthMonitor
-	githubCircuit       *circuitBreaker
+	noCache                      bool
+	enableAudioCues              bool
+	initialLoadComplete          bool
+	menuInitialized              bool
+	healthMonitor                *healthMonitor
+	githubCircuit                *circuitBreaker
 }
 
 func main() {

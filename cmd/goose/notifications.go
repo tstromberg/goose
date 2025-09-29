@@ -89,7 +89,6 @@ func (app *App) processNotifications(ctx context.Context) {
 				app.tryAutoOpenPR(ctx, pr, app.enableAutoBrowser, app.startTime)
 			}
 		}
-
 	}()
 
 	// Update menu immediately after sending notifications
