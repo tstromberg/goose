@@ -7,10 +7,10 @@ import (
 )
 
 // Icon variables are defined in platform-specific files:
-// - icons_windows.go: uses .ico files
-// - icons_unix.go: uses .png files
+// - icons_windows.go: uses .ico files.
+// - icons_unix.go: uses .png files.
 
-// IconType represents different icon states
+// IconType represents different icon states.
 type IconType int
 
 const (
@@ -22,7 +22,7 @@ const (
 	IconLock                    // Authentication error
 )
 
-// getIcon returns the icon bytes for the given type
+// getIcon returns the icon bytes for the given type.
 func getIcon(iconType IconType) []byte {
 	switch iconType {
 	case IconGoose:
@@ -43,7 +43,7 @@ func getIcon(iconType IconType) []byte {
 	}
 }
 
-// loadIconFromFile loads an icon from the filesystem (fallback if embed fails)
+// loadIconFromFile loads an icon from the filesystem (fallback if embed fails).
 func loadIconFromFile(filename string) []byte {
 	iconPath := filepath.Join("icons", filename)
 	data, err := os.ReadFile(iconPath)
@@ -54,7 +54,7 @@ func loadIconFromFile(filename string) []byte {
 	return data
 }
 
-// setTrayIcon updates the system tray icon based on PR counts
+// setTrayIcon updates the system tray icon based on PR counts.
 func (app *App) setTrayIcon(iconType IconType) {
 	iconBytes := getIcon(iconType)
 	if iconBytes == nil || len(iconBytes) == 0 {

@@ -481,6 +481,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			isBlocked := false
 			actionReason := ""
 			actionKind := ""
+			testState := result.turnData.PullRequest.TestState
 			if action, exists := result.turnData.Analysis.NextAction[user]; exists {
 				needsReview = true
 				isBlocked = action.Critical // Only critical actions are blocking
@@ -502,6 +503,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 					(*outgoing)[i].IsBlocked = isBlocked
 					(*outgoing)[i].ActionReason = actionReason
 					(*outgoing)[i].ActionKind = actionKind
+					(*outgoing)[i].TestState = testState
 					break
 				}
 			} else {
@@ -512,6 +514,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 					(*incoming)[i].NeedsReview = needsReview
 					(*incoming)[i].ActionReason = actionReason
 					(*incoming)[i].ActionKind = actionKind
+					(*incoming)[i].TestState = testState
 					break
 				}
 			}
