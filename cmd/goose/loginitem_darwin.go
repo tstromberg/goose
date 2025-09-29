@@ -142,7 +142,7 @@ func appPath() (string, error) {
 }
 
 // addLoginItemUI adds the login item menu option (macOS only).
-func addLoginItemUI(ctx context.Context, _ *App) {
+func addLoginItemUI(ctx context.Context, app *App) {
 	// Check if we're running from an app bundle
 	execPath, err := os.Executable()
 	if err != nil {
@@ -163,12 +163,14 @@ func addLoginItemUI(ctx context.Context, _ *App) {
 		return
 	}
 
-	loginItem := systray.AddMenuItem("Start at Login", "Automatically start when you log in")
-
-	// Set initial state
+	// Add text checkmark for consistency with other menu items
+	var loginText string
 	if isLoginItem(ctx) {
-		loginItem.Check()
+		loginText = "✓ Start at Login"
+	} else {
+		loginText = "Start at Login"
 	}
+	loginItem := systray.AddMenuItem(loginText, "Automatically start when you log in")
 
 	loginItem.Click(func() {
 		isEnabled := isLoginItem(ctx)
@@ -176,20 +178,13 @@ func addLoginItemUI(ctx context.Context, _ *App) {
 
 		if err := setLoginItem(ctx, newState); err != nil {
 			slog.Error("Failed to set login item", "error", err)
-			// Revert the UI state on error
-			if isEnabled {
-				loginItem.Check()
-			} else {
-				loginItem.Uncheck()
-			}
 			return
 		}
 
 		// Update UI state
-		if newState {
-			loginItem.Check()
-		} else {
-			loginItem.Uncheck()
-		}
+		slog.Info("[SETTINGS] Start at Login toggled", "enabled", newState)
+
+		// Rebuild menu to update checkmark
+		app.rebuildMenu(ctx)
 	})
 }

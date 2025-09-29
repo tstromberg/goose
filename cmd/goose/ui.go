@@ -194,26 +194,10 @@ func (app *App) setTrayTitle() {
 	var title string
 	var iconType IconType
 
-	// On Linux, always show counts if there are any PRs
-	// This helps since not all desktop environments show the text
-	if runtime.GOOS == "linux" && (counts.IncomingTotal > 0 || counts.OutgoingTotal > 0) {
-		// Show blocked/total format for better visibility
-		if counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0 {
-			title = fmt.Sprintf("%d/%d • %d/%d", counts.IncomingBlocked, counts.IncomingTotal, counts.OutgoingBlocked, counts.OutgoingTotal)
-			iconType = IconBoth
-		} else if counts.IncomingBlocked > 0 {
-			title = fmt.Sprintf("%d/%d", counts.IncomingBlocked, counts.IncomingTotal)
-			iconType = IconGoose
-		} else if counts.OutgoingBlocked > 0 {
-			title = fmt.Sprintf("%d/%d", counts.OutgoingBlocked, counts.OutgoingTotal)
-			iconType = IconPopper
-		} else {
-			// No blocked PRs but there are PRs
-			title = fmt.Sprintf("0/%d", counts.IncomingTotal+counts.OutgoingTotal)
-			iconType = IconSmiling
-		}
-	} else {
-		// Original behavior for other platforms
+	// On macOS, show counts with the icon
+	// On all other platforms (Linux, Windows, FreeBSD, etc), just show the icon
+	if runtime.GOOS == "darwin" {
+		// macOS: show counts alongside icon
 		switch {
 		case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
 			title = ""
@@ -226,6 +210,19 @@ func (app *App) setTrayTitle() {
 			iconType = IconGoose
 		default:
 			title = fmt.Sprintf("%d", counts.OutgoingBlocked)
+			iconType = IconPopper
+		}
+	} else {
+		// All other platforms: icon only, no text
+		title = ""
+		switch {
+		case counts.IncomingBlocked == 0 && counts.OutgoingBlocked == 0:
+			iconType = IconSmiling
+		case counts.IncomingBlocked > 0 && counts.OutgoingBlocked > 0:
+			iconType = IconBoth
+		case counts.IncomingBlocked > 0:
+			iconType = IconGoose
+		default:
 			iconType = IconPopper
 		}
 	}
@@ -788,7 +785,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		// Add checkbox items for each org
 		for _, org := range orgs {
 			orgName := org // Capture for closure
-			// Add text checkmark for Linux
+			// Add text checkmark for all platforms
 			var orgText string
 			if hiddenOrgs[orgName] {
 				orgText = "✓ " + orgName
@@ -797,24 +794,13 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 			}
 			orgItem := hideOrgsMenu.AddSubMenuItem(orgText, "")
 
-			// Check if org is currently hidden (for non-Linux)
-			if runtime.GOOS != "linux" && hiddenOrgs[orgName] {
-				orgItem.Check()
-			}
-
 			orgItem.Click(func() {
 				app.mu.Lock()
 				if app.hiddenOrgs[orgName] {
 					delete(app.hiddenOrgs, orgName)
-					if runtime.GOOS != "linux" {
-						orgItem.Uncheck()
-					}
 					slog.Info("[SETTINGS] Unhiding org", "org", orgName)
 				} else {
 					app.hiddenOrgs[orgName] = true
-					if runtime.GOOS != "linux" {
-						orgItem.Check()
-					}
 					slog.Info("[SETTINGS] Hiding org", "org", orgName)
 				}
 				app.mu.Unlock()
@@ -822,13 +808,14 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 				// Save settings
 				app.saveSettings()
 
-				// Note: Menu needs manual refresh on Linux to see changes
+				// Rebuild menu to update checkmarks
+				app.rebuildMenu(ctx)
 			})
 		}
 	}
 
 	// Hide stale PRs
-	// Add 'Hide stale PRs' option with text checkmark for Linux
+	// Add 'Hide stale PRs' option with text checkmark for all platforms
 	var hideStaleText string
 	if app.hideStaleIncoming {
 		hideStaleText = "✓ Hide stale PRs (>90 days)"
@@ -836,35 +823,26 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		hideStaleText = "Hide stale PRs (>90 days)"
 	}
 	hideStaleItem := app.systrayInterface.AddMenuItem(hideStaleText, "")
-	if runtime.GOOS != "linux" && app.hideStaleIncoming {
-		hideStaleItem.Check()
-	}
 	hideStaleItem.Click(func() {
 		app.mu.Lock()
 		app.hideStaleIncoming = !app.hideStaleIncoming
 		hideStale := app.hideStaleIncoming
 		app.mu.Unlock()
 
-		if runtime.GOOS != "linux" {
-			if hideStale {
-				hideStaleItem.Check()
-			} else {
-				hideStaleItem.Uncheck()
-			}
-		}
-
 		// Save settings to disk
 		app.saveSettings()
 
-		// Note: Menu needs manual refresh on Linux to see changes
 		slog.Info("[SETTINGS] Hide stale PRs toggled", "enabled", hideStale)
+
+		// Rebuild menu to update checkmarks
+		app.rebuildMenu(ctx)
 	})
 
 	// Add login item option (macOS only)
 	addLoginItemUI(ctx, app)
 
 	// Audio cues
-	// Add 'Audio cues' option with text checkmark for Linux
+	// Add 'Audio cues' option with text checkmark for all platforms
 	app.mu.RLock()
 	var audioText string
 	if app.enableAudioCues {
@@ -872,34 +850,25 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	} else {
 		audioText = "Honks enabled"
 	}
-	enableAudioCues := app.enableAudioCues
 	app.mu.RUnlock()
 	audioItem := app.systrayInterface.AddMenuItem(audioText, "Play sounds for notifications")
-	if runtime.GOOS != "linux" && enableAudioCues {
-		audioItem.Check()
-	}
 	audioItem.Click(func() {
 		app.mu.Lock()
 		app.enableAudioCues = !app.enableAudioCues
 		enabled := app.enableAudioCues
 		app.mu.Unlock()
 
-		if runtime.GOOS != "linux" {
-			if enabled {
-				audioItem.Check()
-			} else {
-				audioItem.Uncheck()
-			}
-		}
-
 		slog.Info("[SETTINGS] Audio cues toggled", "enabled", enabled)
 
 		// Save settings to disk
 		app.saveSettings()
+
+		// Rebuild menu to update checkmarks
+		app.rebuildMenu(ctx)
 	})
 
 	// Auto-open blocked PRs in browser
-	// Add 'Auto-open PRs' option with text checkmark for Linux
+	// Add 'Auto-open PRs' option with text checkmark for all platforms
 	app.mu.RLock()
 	var autoText string
 	if app.enableAutoBrowser {
@@ -907,12 +876,8 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 	} else {
 		autoText = "Auto-open incoming PRs"
 	}
-	enableAutoBrowser := app.enableAutoBrowser
 	app.mu.RUnlock()
 	autoOpenItem := app.systrayInterface.AddMenuItem(autoText, "Automatically open newly blocked PRs in browser (rate limited)")
-	if runtime.GOOS != "linux" && enableAutoBrowser {
-		autoOpenItem.Check()
-	}
 	autoOpenItem.Click(func() {
 		app.mu.Lock()
 		app.enableAutoBrowser = !app.enableAutoBrowser
@@ -923,18 +888,13 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		}
 		app.mu.Unlock()
 
-		if runtime.GOOS != "linux" {
-			if enabled {
-				autoOpenItem.Check()
-			} else {
-				autoOpenItem.Uncheck()
-			}
-		}
-
 		slog.Info("[SETTINGS] Auto-open blocked PRs toggled", "enabled", enabled)
 
 		// Save settings to disk
 		app.saveSettings()
+
+		// Rebuild menu to update checkmarks
+		app.rebuildMenu(ctx)
 	})
 
 	// Quit
