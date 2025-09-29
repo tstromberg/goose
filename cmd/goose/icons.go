@@ -1,28 +1,14 @@
 package main
 
 import (
-	_ "embed"
 	"log/slog"
 	"os"
 	"path/filepath"
 )
 
-// Embed icon files at compile time for better distribution
-//
-//go:embed icons/goose.png
-var iconGoose []byte
-
-//go:embed icons/popper.png
-var iconPopper []byte
-
-//go:embed icons/smiling-face.png
-var iconSmiling []byte
-
-//go:embed icons/lock.png
-var iconLock []byte
-
-//go:embed icons/warning.png
-var iconWarning []byte
+// Icon variables are defined in platform-specific files:
+// - icons_windows.go: uses .ico files
+// - icons_unix.go: uses .png files
 
 // IconType represents different icon states
 type IconType int
