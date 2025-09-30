@@ -21,7 +21,7 @@ func (app *App) loadSettings() {
 	// Set defaults first
 	app.enableAudioCues = true
 	app.hideStaleIncoming = true
-	app.enableAutoBrowser = false
+	app.enableAutoBrowser = true
 	app.hiddenOrgs = make(map[string]bool)
 
 	configDir, err := os.UserConfigDir()
