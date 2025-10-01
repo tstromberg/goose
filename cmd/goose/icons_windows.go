@@ -20,5 +20,8 @@ var iconSmiling []byte
 //go:embed icons/warning.ico
 var iconWarning []byte
 
+//go:embed icons/cockroach.ico
+var iconCockroach []byte
+
 // lock.ico not yet created, using warning as fallback
 var iconLock = iconWarning

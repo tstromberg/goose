@@ -227,6 +227,9 @@ func main() {
 		githubCircuit:      newCircuitBreaker("github", 5, 2*time.Minute),
 	}
 
+	// Set app reference in health monitor for sprinkler status
+	app.healthMonitor.app = app
+
 	// Load saved settings
 	app.loadSettings()
 
@@ -270,6 +273,13 @@ func main() {
 			if app.targetUser != "" && app.targetUser != user.GetLogin() {
 				slog.Info("Querying PRs for different user", "targetUser", sanitizeForLog(app.targetUser))
 			}
+
+			// Initialize sprinkler with user's organizations now that we have the user
+			go func() {
+				if err := app.initSprinklerOrgs(ctx); err != nil {
+					slog.Warn("[SPRINKLER] Failed to initialize organizations", "error", err)
+				}
+			}()
 		} else {
 			slog.Warn("GitHub API returned nil user")
 		}
@@ -822,7 +832,14 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 
 // tryAutoOpenPR attempts to open a PR in the browser if enabled and rate limits allow.
 func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled bool, startTime time.Time) {
+	slog.Debug("[BROWSER] tryAutoOpenPR called",
+		"repo", pr.Repository,
+		"number", pr.Number,
+		"enabled", autoBrowserEnabled,
+		"time_since_start", time.Since(startTime).Round(time.Second))
+
 	if !autoBrowserEnabled {
+		slog.Debug("[BROWSER] Auto-open disabled, skipping")
 		return
 	}
 

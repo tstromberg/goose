@@ -22,3 +22,6 @@ var iconLock []byte
 
 //go:embed icons/warning.png
 var iconWarning []byte
+
+//go:embed icons/cockroach.png
+var iconCockroach []byte

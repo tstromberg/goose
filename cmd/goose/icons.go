@@ -2,8 +2,6 @@ package main
 
 import (
 	"log/slog"
-	"os"
-	"path/filepath"
 )
 
 // Icon variables are defined in platform-specific files:
@@ -14,12 +12,13 @@ import (
 type IconType int
 
 const (
-	IconSmiling IconType = iota // No blocked PRs
-	IconGoose                   // Incoming PRs blocked
-	IconPopper                  // Outgoing PRs blocked
-	IconBoth                    // Both incoming and outgoing blocked
-	IconWarning                 // General error/warning
-	IconLock                    // Authentication error
+	IconSmiling   IconType = iota // No blocked PRs
+	IconGoose                     // Incoming PRs blocked
+	IconPopper                    // Outgoing PRs blocked
+	IconCockroach                 // Outgoing PRs blocked (fix_tests only)
+	IconBoth                      // Both incoming and outgoing blocked
+	IconWarning                   // General error/warning
+	IconLock                      // Authentication error
 )
 
 // getIcon returns the icon bytes for the given type.
@@ -29,6 +28,8 @@ func getIcon(iconType IconType) []byte {
 		return iconGoose
 	case IconPopper:
 		return iconPopper
+	case IconCockroach:
+		return iconCockroach
 	case IconSmiling:
 		return iconSmiling
 	case IconWarning:
@@ -41,17 +42,6 @@ func getIcon(iconType IconType) []byte {
 	default:
 		return iconSmiling
 	}
-}
-
-// loadIconFromFile loads an icon from the filesystem (fallback if embed fails).
-func loadIconFromFile(filename string) []byte {
-	iconPath := filepath.Join("icons", filename)
-	data, err := os.ReadFile(iconPath)
-	if err != nil {
-		slog.Warn("Failed to load icon file", "path", iconPath, "error", err)
-		return nil
-	}
-	return data
 }
 
 // setTrayIcon updates the system tray icon based on PR counts.

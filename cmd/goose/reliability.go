@@ -114,6 +114,7 @@ type healthMonitor struct {
 	apiErrors     int64
 	cacheHits     int64
 	cacheMisses   int64
+	app           *App // Reference to app for accessing sprinkler status
 }
 
 func newHealthMonitor() *healthMonitor {
@@ -174,10 +175,24 @@ func (hm *healthMonitor) getMetrics() map[string]interface{} {
 
 func (hm *healthMonitor) logMetrics() {
 	metrics := hm.getMetrics()
+
+	// Get sprinkler connection status
+	sprinklerConnected := false
+	sprinklerLastConnected := ""
+	if hm.app.sprinklerMonitor != nil {
+		connected, lastConnectedAt := hm.app.sprinklerMonitor.connectionStatus()
+		sprinklerConnected = connected
+		if !lastConnectedAt.IsZero() {
+			sprinklerLastConnected = time.Since(lastConnectedAt).Round(time.Second).String() + " ago"
+		}
+	}
+
 	slog.Info("[HEALTH] Application metrics",
 		"uptime", metrics["uptime"],
 		"api_calls", metrics["api_calls"],
 		"api_errors", metrics["api_errors"],
 		"error_rate_pct", fmt.Sprintf("%.1f", metrics["error_rate"]),
-		"cache_hit_rate_pct", fmt.Sprintf("%.1f", metrics["cache_hit_rate"]))
+		"cache_hit_rate_pct", fmt.Sprintf("%.1f", metrics["cache_hit_rate"]),
+		"sprinkler_connected", sprinklerConnected,
+		"sprinkler_last_connected", sprinklerLastConnected)
 }

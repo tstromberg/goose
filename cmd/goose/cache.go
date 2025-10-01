@@ -161,6 +161,16 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 		app.healthMonitor.recordAPICall(true)
 	}
 
+	// Log Turn API response for debugging
+	if data != nil {
+		slog.Info("[TURN] API response details",
+			"url", url,
+			"test_state", data.PullRequest.TestState,
+			"state", data.PullRequest.State,
+			"merged", data.PullRequest.Merged,
+			"pending_checks", len(data.PullRequest.CheckSummary.Pending))
+	}
+
 	// Save to cache (don't fail if caching fails) - skip if --no-cache is set
 	// Don't cache when tests are incomplete - always re-poll to catch completion
 	if !app.noCache {
@@ -177,7 +187,7 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 			slog.Debug("[CACHE] Skipping cache for PR with incomplete tests",
 				"url", url,
 				"test_state", testState,
-				"pending_checks", len(data.PullRequest.CheckSummary.PendingStatuses))
+				"pending_checks", len(data.PullRequest.CheckSummary.Pending))
 		}
 
 		if shouldCache {
