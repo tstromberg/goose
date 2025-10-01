@@ -82,6 +82,7 @@ type App struct {
 	hiddenOrgs                   map[string]bool
 	seenOrgs                     map[string]bool
 	turnClient                   *turn.Client
+	sprinklerMonitor             *sprinklerMonitor
 	previousBlockedPRs           map[string]bool
 	authError                    string
 	lastFetchError               string
@@ -94,6 +95,7 @@ type App struct {
 	consecutiveFailures          int
 	mu                           sync.RWMutex
 	menuMutex                    sync.Mutex // Mutex to prevent concurrent menu rebuilds
+	updateMutex                  sync.Mutex // Mutex to prevent concurrent PR updates
 	enableAutoBrowser            bool
 	hideStaleIncoming            bool
 	hasPerformedInitialDiscovery bool // Track if we've done the first poll to distinguish from real state changes
@@ -283,6 +285,9 @@ func main() {
 	systray.Run(func() { app.onReady(appCtx) }, func() {
 		slog.Info("Shutting down application")
 		cancel() // Cancel the context to stop goroutines
+		if app.sprinklerMonitor != nil {
+			app.sprinklerMonitor.stop()
+		}
 		app.cleanupOldCache()
 	})
 }
@@ -504,6 +509,13 @@ func (app *App) updateLoop(ctx context.Context) {
 }
 
 func (app *App) updatePRs(ctx context.Context) {
+	// Prevent concurrent updates
+	if !app.updateMutex.TryLock() {
+		slog.Debug("[UPDATE] Update already in progress, skipping")
+		return
+	}
+	defer app.updateMutex.Unlock()
+
 	var incoming, outgoing []PR
 	err := safeExecute("fetchPRs", func() error {
 		var fetchErr error
@@ -683,6 +695,13 @@ func (app *App) updateMenu(ctx context.Context) {
 
 // updatePRsWithWait fetches PRs and waits for Turn data before building initial menu.
 func (app *App) updatePRsWithWait(ctx context.Context) {
+	// Prevent concurrent updates
+	if !app.updateMutex.TryLock() {
+		slog.Debug("[UPDATE] Update already in progress, skipping")
+		return
+	}
+	defer app.updateMutex.Unlock()
+
 	incoming, outgoing, err := app.fetchPRsInternal(ctx)
 	if err != nil {
 		slog.Error("Error fetching PRs", "error", err)

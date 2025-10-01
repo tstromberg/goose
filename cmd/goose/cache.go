@@ -25,7 +25,6 @@ type cacheEntry struct {
 
 // turnData fetches Turn API data with caching.
 func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, bool, error) {
-	prAge := time.Since(updatedAt)
 	hasRunningTests := false
 	// Validate URL before processing
 	if err := validateURL(url); err != nil {
@@ -57,13 +56,16 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 				}
 			} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
 				// Check if cache is still valid (10 day TTL, but PR UpdatedAt is primary check)
-				// But invalidate cache for PRs with running tests if they're fresh (< 90 minutes old)
-				if entry.Data != nil && entry.Data.PullRequest.TestState == "running" && prAge < runningTestsCacheBypass {
+				// But invalidate cache for PRs with incomplete tests if cache entry is fresh (< 90 minutes old)
+				cacheAge := time.Since(entry.CachedAt)
+				testState := entry.Data.PullRequest.TestState
+				isTestIncomplete := testState == "running" || testState == "queued" || testState == "pending"
+				if entry.Data != nil && isTestIncomplete && cacheAge < runningTestsCacheBypass {
 					hasRunningTests = true
-					slog.Debug("[CACHE] Cache invalidated - PR has running tests and is fresh",
+					slog.Debug("[CACHE] Cache invalidated - tests incomplete and cache entry is fresh",
 						"url", url,
-						"test_state", entry.Data.PullRequest.TestState,
-						"pr_age", prAge.Round(time.Minute),
+						"test_state", testState,
+						"cache_age", cacheAge.Round(time.Minute),
 						"cached_at", entry.CachedAt.Format(time.RFC3339))
 					// Don't return cached data - fall through to fetch fresh data with current time
 				} else {
@@ -160,18 +162,21 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	}
 
 	// Save to cache (don't fail if caching fails) - skip if --no-cache is set
-	// Also skip caching if tests are running and PR is fresh (updated in last 90 minutes)
+	// Don't cache when tests are incomplete - always re-poll to catch completion
 	if !app.noCache {
 		shouldCache := true
-		prAge := time.Since(updatedAt)
 
-		// Don't cache PRs with running tests unless they're older than 90 minutes
-		if data != nil && data.PullRequest.TestState == "running" && prAge < runningTestsCacheBypass {
+		// Never cache PRs with incomplete tests - we want fresh data on every poll
+		testState := ""
+		if data != nil {
+			testState = data.PullRequest.TestState
+		}
+		isTestIncomplete := testState == "running" || testState == "queued" || testState == "pending"
+		if data != nil && isTestIncomplete {
 			shouldCache = false
-			slog.Debug("[CACHE] Skipping cache for PR with running tests",
+			slog.Debug("[CACHE] Skipping cache for PR with incomplete tests",
 				"url", url,
-				"test_state", data.PullRequest.TestState,
-				"pr_age", prAge.Round(time.Minute),
+				"test_state", testState,
 				"pending_checks", len(data.PullRequest.CheckSummary.PendingStatuses))
 		}
 
