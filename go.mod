@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/codeGROOVE-dev/retry v1.2.0
+	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251001125233-5fa6f0ff4582
 	github.com/codeGROOVE-dev/turnclient v0.0.0-20250922145707-664c2dcdf5b8
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
@@ -25,5 +26,6 @@ require (
 	github.com/sergeymakinen/go-ico v1.0.0-beta.0 // indirect
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	github.com/tevino/abool v0.0.0-20220530134649-2bfc934cb23c // indirect
+	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 )

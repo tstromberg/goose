@@ -53,6 +53,9 @@ func (app *App) initClients(ctx context.Context) error {
 	turnClient.SetAuthToken(token)
 	app.turnClient = turnClient
 
+	// Initialize sprinkler monitor for real-time events
+	app.sprinklerMonitor = newSprinklerMonitor(app, token)
+
 	return nil
 }
 
@@ -404,6 +407,22 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 
 	// Only log summary, not individual PRs
 	slog.Info("[GITHUB] GitHub PR summary", "incoming", len(incoming), "outgoing", len(outgoing))
+
+	// Update sprinkler monitor with discovered orgs
+	app.mu.RLock()
+	orgs := make([]string, 0, len(app.seenOrgs))
+	for org := range app.seenOrgs {
+		orgs = append(orgs, org)
+	}
+	app.mu.RUnlock()
+
+	if app.sprinklerMonitor != nil && len(orgs) > 0 {
+		app.sprinklerMonitor.updateOrgs(orgs)
+		// Start monitor if not already running
+		if err := app.sprinklerMonitor.start(); err != nil {
+			slog.Warn("[SPRINKLER] Failed to start monitor", "error", err)
+		}
+	}
 
 	// Fetch Turn API data
 	// Always synchronous now for simplicity - Turn API calls are fast with caching

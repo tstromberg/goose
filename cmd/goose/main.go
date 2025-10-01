@@ -82,6 +82,7 @@ type App struct {
 	hiddenOrgs                   map[string]bool
 	seenOrgs                     map[string]bool
 	turnClient                   *turn.Client
+	sprinklerMonitor             *sprinklerMonitor
 	previousBlockedPRs           map[string]bool
 	authError                    string
 	lastFetchError               string
@@ -283,6 +284,9 @@ func main() {
 	systray.Run(func() { app.onReady(appCtx) }, func() {
 		slog.Info("Shutting down application")
 		cancel() // Cancel the context to stop goroutines
+		if app.sprinklerMonitor != nil {
+			app.sprinklerMonitor.stop()
+		}
 		app.cleanupOldCache()
 	})
 }
