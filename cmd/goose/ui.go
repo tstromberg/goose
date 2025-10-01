@@ -190,6 +190,21 @@ func (app *App) countPRs() PRCounts {
 func (app *App) setTrayTitle() {
 	counts := app.countPRs()
 
+	// Check if all outgoing blocked PRs are fix_tests only
+	allOutgoingAreFixTests := false
+	if counts.OutgoingBlocked > 0 && counts.IncomingBlocked == 0 {
+		app.mu.RLock()
+		allFixTests := true
+		for i := range app.outgoing {
+			if app.outgoing[i].IsBlocked && app.outgoing[i].ActionKind != "fix_tests" {
+				allFixTests = false
+				break
+			}
+		}
+		app.mu.RUnlock()
+		allOutgoingAreFixTests = allFixTests
+	}
+
 	// Set title and icon based on PR state
 	var title string
 	var iconType IconType
@@ -210,7 +225,11 @@ func (app *App) setTrayTitle() {
 			iconType = IconGoose
 		default:
 			title = fmt.Sprintf("%d", counts.OutgoingBlocked)
-			iconType = IconPopper
+			if allOutgoingAreFixTests {
+				iconType = IconCockroach
+			} else {
+				iconType = IconPopper
+			}
 		}
 	} else {
 		// All other platforms: icon only, no text
@@ -223,7 +242,11 @@ func (app *App) setTrayTitle() {
 		case counts.IncomingBlocked > 0:
 			iconType = IconGoose
 		default:
-			iconType = IconPopper
+			if allOutgoingAreFixTests {
+				iconType = IconCockroach
+			} else {
+				iconType = IconPopper
+			}
 		}
 	}
 

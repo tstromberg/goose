@@ -6,8 +6,8 @@ github.com/codeGROOVE-dev/retry v1.2.0 h1:xYpYPX2PQZmdHwuiQAGGzsBm392xIMl4nfMEFA
 github.com/codeGROOVE-dev/retry v1.2.0/go.mod h1:8OgefgV1XP7lzX2PdKlCXILsYKuz6b4ZpHa/20iLi8E=
 github.com/codeGROOVE-dev/sprinkler v0.0.0-20251001154245-068712aa969d h1:tQX67dAzyWVAaNe0EhYpj/AmWZo1Wwhaah6KVj7M3qs=
 github.com/codeGROOVE-dev/sprinkler v0.0.0-20251001154245-068712aa969d/go.mod h1:RZ/Te7HkY5upHQlnmf3kV4GHVM0R8AK3U+yPItCZAoQ=
-github.com/codeGROOVE-dev/turnclient v0.0.0-20251001151440-a58eb9b17826 h1:ly6n4spiC6r0IOMl8QfZjv+qUnMHLvo/qErGPVMV3IE=
-github.com/codeGROOVE-dev/turnclient v0.0.0-20251001151440-a58eb9b17826/go.mod h1:JXk9gT6Qb496lnTcgpk9h917XaREGa+t6Kvg0YHAQJY=
+github.com/codeGROOVE-dev/turnclient v0.0.0-20251001194229-2aaea2e63cc7 h1:iRWrlJusl5FiEC1sCiPoW8IFei5bebAIornGtQFUHbc=
+github.com/codeGROOVE-dev/turnclient v0.0.0-20251001194229-2aaea2e63cc7/go.mod h1:Rt0k+aoZ13TvXKl9n2AeBabWIXZ/xIvurdwFTgyNk0w=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -23,8 +23,8 @@ github.com/godbus/dbus/v5 v5.0.4/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5x
 github.com/godbus/dbus/v5 v5.1.0 h1:4KLkAxT3aOY8Li4FRJe/KvhoNFFxo0m6fNuFUO8QJUk=
 github.com/godbus/dbus/v5 v5.1.0/go.mod h1:xhWf0FNVPg57R7Z0UbKHbJfkEywrmjJnf7w5xrFpKfA=
 github.com/google/go-cmp v0.5.2/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
-github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
-github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
+github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
+github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/google/go-github/v57 v57.0.0 h1:L+Y3UPTY8ALM8x+TV0lg+IEBI+upibemtBD8Q9u7zHs=
 github.com/google/go-github/v57 v57.0.0/go.mod h1:s0omdnye0hvK/ecLvpsGfJMiRt85PimQh4oygmLIxHw=
 github.com/google/go-querystring v1.1.0 h1:AnCroh3fv4ZBgVIf1Iwtovgjaw/GiKJo8M8yD/fhyJ8=

@@ -12,12 +12,13 @@ import (
 type IconType int
 
 const (
-	IconSmiling IconType = iota // No blocked PRs
-	IconGoose                   // Incoming PRs blocked
-	IconPopper                  // Outgoing PRs blocked
-	IconBoth                    // Both incoming and outgoing blocked
-	IconWarning                 // General error/warning
-	IconLock                    // Authentication error
+	IconSmiling   IconType = iota // No blocked PRs
+	IconGoose                     // Incoming PRs blocked
+	IconPopper                    // Outgoing PRs blocked
+	IconCockroach                 // Outgoing PRs blocked (fix_tests only)
+	IconBoth                      // Both incoming and outgoing blocked
+	IconWarning                   // General error/warning
+	IconLock                      // Authentication error
 )
 
 // getIcon returns the icon bytes for the given type.
@@ -27,6 +28,8 @@ func getIcon(iconType IconType) []byte {
 		return iconGoose
 	case IconPopper:
 		return iconPopper
+	case IconCockroach:
+		return iconCockroach
 	case IconSmiling:
 		return iconSmiling
 	case IconWarning:

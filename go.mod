@@ -1,11 +1,11 @@
-module github.com/ready-to-review/goose
+module github.com/codeGROOVE-dev/goose
 
-go 1.25.1
+go 1.24.0
 
 require (
 	github.com/codeGROOVE-dev/retry v1.2.0
 	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251001154245-068712aa969d
-	github.com/codeGROOVE-dev/turnclient v0.0.0-20251001151440-a58eb9b17826
+	github.com/codeGROOVE-dev/turnclient v0.0.0-20251001194229-2aaea2e63cc7
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
 	github.com/google/go-github/v57 v57.0.0
@@ -18,7 +18,6 @@ require (
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/jackmordaunt/icns/v3 v3.0.1 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
