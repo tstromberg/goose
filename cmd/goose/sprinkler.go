@@ -339,6 +339,68 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 		return
 	}
 
+	// Log Turn API response details
+	prState := ""
+	prIsMerged := false
+	if turnData != nil {
+		prState = turnData.PullRequest.State
+		prIsMerged = turnData.PullRequest.Merged
+	}
+
+	slog.Info("[SPRINKLER] Turn API response",
+		"repo", repo,
+		"number", number,
+		"cached", wasFromCache,
+		"state", prState,
+		"merged", prIsMerged,
+		"has_data", turnData != nil,
+		"has_analysis", turnData != nil && turnData.Analysis.NextAction != nil)
+
+	// Skip closed/merged PRs and remove from lists immediately
+	if prState == "closed" || prIsMerged {
+		slog.Info("[SPRINKLER] PR closed/merged, removing from lists",
+			"repo", repo,
+			"number", number,
+			"state", prState,
+			"merged", prIsMerged,
+			"url", prURL)
+
+		// Remove from in-memory lists immediately
+		sm.app.mu.Lock()
+		originalIncoming := len(sm.app.incoming)
+		originalOutgoing := len(sm.app.outgoing)
+
+		// Filter out this PR from incoming
+		filteredIncoming := make([]PR, 0, len(sm.app.incoming))
+		for _, pr := range sm.app.incoming {
+			if pr.URL != prURL {
+				filteredIncoming = append(filteredIncoming, pr)
+			}
+		}
+		sm.app.incoming = filteredIncoming
+
+		// Filter out this PR from outgoing
+		filteredOutgoing := make([]PR, 0, len(sm.app.outgoing))
+		for _, pr := range sm.app.outgoing {
+			if pr.URL != prURL {
+				filteredOutgoing = append(filteredOutgoing, pr)
+			}
+		}
+		sm.app.outgoing = filteredOutgoing
+		sm.app.mu.Unlock()
+
+		slog.Info("[SPRINKLER] Removed PR from lists",
+			"url", prURL,
+			"incoming_before", originalIncoming,
+			"incoming_after", len(sm.app.incoming),
+			"outgoing_before", originalOutgoing,
+			"outgoing_after", len(sm.app.outgoing))
+
+		// Update UI to reflect removal
+		sm.app.updateMenu(sm.ctx)
+		return
+	}
+
 	if turnData == nil || turnData.Analysis.NextAction == nil {
 		slog.Debug("[SPRINKLER] No turn data available",
 			"repo", repo,
@@ -353,7 +415,8 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 		slog.Debug("[SPRINKLER] No action required for user",
 			"repo", repo,
 			"number", number,
-			"user", user)
+			"user", user,
+			"state", prState)
 		return
 	}
 
@@ -364,6 +427,36 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 			"action", action.Kind,
 			"critical", action.Critical)
 		return
+	}
+
+	// Check if PR exists in our lists
+	sm.app.mu.RLock()
+	foundIncoming := false
+	foundOutgoing := false
+	for i := range sm.app.incoming {
+		if sm.app.incoming[i].URL == prURL {
+			foundIncoming = true
+			break
+		}
+	}
+	if !foundIncoming {
+		for i := range sm.app.outgoing {
+			if sm.app.outgoing[i].URL == prURL {
+				foundOutgoing = true
+				break
+			}
+		}
+	}
+	sm.app.mu.RUnlock()
+
+	// If PR not found in our lists, trigger a refresh to fetch it
+	if !foundIncoming && !foundOutgoing {
+		slog.Info("[SPRINKLER] New PR detected, triggering refresh",
+			"repo", repo,
+			"number", number,
+			"action", action.Kind)
+		go sm.app.updatePRs(sm.ctx)
+		return // Let the refresh handle everything
 	}
 
 	slog.Info("[SPRINKLER] Blocking PR detected via event",

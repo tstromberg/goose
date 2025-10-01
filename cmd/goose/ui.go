@@ -501,6 +501,9 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 		// Add action code if present
 		if sortedPRs[prIndex].ActionKind != "" {
 			title = fmt.Sprintf("%s — %s", title, sortedPRs[prIndex].ActionKind)
+		} else if sortedPRs[prIndex].TestState == "running" {
+			// Show "tests running" as a fallback when no specific action is available
+			title = fmt.Sprintf("%s — tests running...", title)
 		}
 
 		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)

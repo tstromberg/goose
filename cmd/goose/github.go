@@ -399,8 +399,10 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 		// Categorize as incoming or outgoing
 		// When viewing another user's PRs, we're looking at it from their perspective
 		if issue.GetUser().GetLogin() == user {
+			slog.Info("[GITHUB] Found outgoing PR", "repo", repo, "number", pr.Number, "author", pr.Author, "url", pr.URL)
 			outgoing = append(outgoing, pr)
 		} else {
+			slog.Info("[GITHUB] Found incoming PR", "repo", repo, "number", pr.Number, "author", pr.Author, "url", pr.URL)
 			incoming = append(incoming, pr)
 		}
 	}
