@@ -37,15 +37,20 @@ func (b *BrowserRateLimiter) CanOpen(startTime time.Time, prURL string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	slog.Info("[BROWSER] CanOpen check",
+		"url", prURL,
+		"time_since_start", time.Since(startTime).Round(time.Second),
+		"startup_delay", b.startupDelay)
+
 	// Check if we've already opened this PR
 	if b.openedPRs[prURL] {
-		slog.Debug("[BROWSER] Skipping auto-open: PR already opened", "url", prURL)
+		slog.Info("[BROWSER] Skipping auto-open: PR already opened", "url", prURL)
 		return false
 	}
 
 	// Check startup delay
 	if time.Since(startTime) < b.startupDelay {
-		slog.Debug("[BROWSER] Skipping auto-open: within startup delay period",
+		slog.Info("[BROWSER] Skipping auto-open: within startup delay period",
 			"remaining", b.startupDelay-time.Since(startTime))
 		return false
 	}
@@ -57,18 +62,19 @@ func (b *BrowserRateLimiter) CanOpen(startTime time.Time, prURL string) bool {
 
 	// Check per-minute limit
 	if len(b.openedLastMinute) >= b.maxPerMinute {
-		slog.Debug("[BROWSER] Rate limit: per-minute limit reached",
+		slog.Info("[BROWSER] Rate limit: per-minute limit reached",
 			"opened", len(b.openedLastMinute), "max", b.maxPerMinute)
 		return false
 	}
 
 	// Check per-day limit
 	if len(b.openedToday) >= b.maxPerDay {
-		slog.Debug("[BROWSER] Rate limit: daily limit reached",
+		slog.Info("[BROWSER] Rate limit: daily limit reached",
 			"opened", len(b.openedToday), "max", b.maxPerDay)
 		return false
 	}
 
+	slog.Info("[BROWSER] CanOpen returning true", "url", prURL)
 	return true
 }
 

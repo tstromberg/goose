@@ -832,7 +832,14 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 
 // tryAutoOpenPR attempts to open a PR in the browser if enabled and rate limits allow.
 func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled bool, startTime time.Time) {
+	slog.Debug("[BROWSER] tryAutoOpenPR called",
+		"repo", pr.Repository,
+		"number", pr.Number,
+		"enabled", autoBrowserEnabled,
+		"time_since_start", time.Since(startTime).Round(time.Second))
+
 	if !autoBrowserEnabled {
+		slog.Debug("[BROWSER] Auto-open disabled, skipping")
 		return
 	}
 

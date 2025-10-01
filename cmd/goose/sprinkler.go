@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -56,75 +55,19 @@ func newSprinklerMonitor(app *App, token string) *sprinklerMonitor {
 	}
 }
 
-// updateOrgs updates the list of organizations to monitor.
+// updateOrgs sets the list of organizations to monitor.
 func (sm *sprinklerMonitor) updateOrgs(orgs []string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Sort both lists for comparison
-	sortedNew := make([]string, len(orgs))
-	copy(sortedNew, orgs)
-	sort.Strings(sortedNew)
-
-	sortedOld := make([]string, len(sm.orgs))
-	copy(sortedOld, sm.orgs)
-	sort.Strings(sortedOld)
-
-	// Check if orgs changed after sorting
-	if len(sortedNew) == len(sortedOld) {
-		same := true
-		for i := range sortedNew {
-			if sortedNew[i] != sortedOld[i] {
-				same = false
-				break
-			}
-		}
-		if same {
-			slog.Debug("[SPRINKLER] Org list unchanged (same after sorting)",
-				"orgs", sortedNew,
-				"count", len(sortedNew))
-			return // No change
-		}
+	if len(orgs) == 0 {
+		slog.Debug("[SPRINKLER] No organizations provided")
+		return
 	}
 
-	// Find what changed
-	added := []string{}
-	removed := []string{}
-	oldMap := make(map[string]bool)
-	for _, org := range sm.orgs {
-		oldMap[org] = true
-	}
-	newMap := make(map[string]bool)
-	for _, org := range orgs {
-		newMap[org] = true
-		if !oldMap[org] {
-			added = append(added, org)
-		}
-	}
-	for _, org := range sm.orgs {
-		if !newMap[org] {
-			removed = append(removed, org)
-		}
-	}
-
-	slog.Info("[SPRINKLER] Organization list changed",
-		"previous", sm.orgs,
-		"new", orgs,
-		"added", added,
-		"removed", removed)
-
+	slog.Info("[SPRINKLER] Setting organizations", "orgs", orgs, "count", len(orgs))
 	sm.orgs = make([]string, len(orgs))
 	copy(sm.orgs, orgs)
-
-	// Restart if running
-	if sm.isRunning {
-		slog.Info("[SPRINKLER] Restarting monitor with new org list")
-		sm.stop()
-		sm.ctx, sm.cancel = context.WithCancel(context.Background())
-		if err := sm.start(); err != nil {
-			slog.Error("[SPRINKLER] Failed to restart", "error", err)
-		}
-	}
 }
 
 // start begins monitoring for PR events across all user orgs.
@@ -318,8 +261,7 @@ func (sm *sprinklerMonitor) handleEvent(event client.Event) {
 func (sm *sprinklerMonitor) processEvents() {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("[SPRINKLER] Event processor panic",
-				"panic", r)
+			slog.Error("[SPRINKLER] Event processor panic", "panic", r)
 		}
 	}()
 
@@ -328,17 +270,7 @@ func (sm *sprinklerMonitor) processEvents() {
 		case <-sm.ctx.Done():
 			return
 		case prURL := <-sm.eventChan:
-			// Process each event with panic recovery
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Error("[SPRINKLER] Event processing panic",
-							"panic", r,
-							"url", prURL)
-					}
-				}()
-				sm.checkAndNotify(prURL)
-			}()
+			sm.checkAndNotify(prURL)
 		}
 	}
 }

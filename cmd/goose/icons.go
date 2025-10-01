@@ -2,8 +2,6 @@ package main
 
 import (
 	"log/slog"
-	"os"
-	"path/filepath"
 )
 
 // Icon variables are defined in platform-specific files:
@@ -41,17 +39,6 @@ func getIcon(iconType IconType) []byte {
 	default:
 		return iconSmiling
 	}
-}
-
-// loadIconFromFile loads an icon from the filesystem (fallback if embed fails).
-func loadIconFromFile(filename string) []byte {
-	iconPath := filepath.Join("icons", filename)
-	data, err := os.ReadFile(iconPath)
-	if err != nil {
-		slog.Warn("Failed to load icon file", "path", iconPath, "error", err)
-		return nil
-	}
-	return data
 }
 
 // setTrayIcon updates the system tray icon based on PR counts.
