@@ -227,6 +227,9 @@ func main() {
 		githubCircuit:      newCircuitBreaker("github", 5, 2*time.Minute),
 	}
 
+	// Set app reference in health monitor for sprinkler status
+	app.healthMonitor.app = app
+
 	// Load saved settings
 	app.loadSettings()
 
@@ -270,6 +273,13 @@ func main() {
 			if app.targetUser != "" && app.targetUser != user.GetLogin() {
 				slog.Info("Querying PRs for different user", "targetUser", sanitizeForLog(app.targetUser))
 			}
+
+			// Initialize sprinkler with user's organizations now that we have the user
+			go func() {
+				if err := app.initSprinklerOrgs(ctx); err != nil {
+					slog.Warn("[SPRINKLER] Failed to initialize organizations", "error", err)
+				}
+			}()
 		} else {
 			slog.Warn("GitHub API returned nil user")
 		}

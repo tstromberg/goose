@@ -59,6 +59,91 @@ func (app *App) initClients(ctx context.Context) error {
 	return nil
 }
 
+// initSprinklerOrgs fetches the user's organizations and starts sprinkler monitoring.
+func (app *App) initSprinklerOrgs(ctx context.Context) error {
+	if app.client == nil || app.sprinklerMonitor == nil {
+		return fmt.Errorf("client or sprinkler not initialized")
+	}
+
+	// Get current user
+	user := ""
+	if app.currentUser != nil {
+		user = app.currentUser.GetLogin()
+	}
+	if app.targetUser != "" {
+		user = app.targetUser
+	}
+	if user == "" {
+		return fmt.Errorf("no user configured")
+	}
+
+	slog.Info("[SPRINKLER] Fetching user's organizations", "user", user)
+
+	// Fetch all orgs the user is a member of with retry
+	opts := &github.ListOptions{PerPage: 100}
+	var allOrgs []string
+
+	for {
+		var orgs []*github.Organization
+		var resp *github.Response
+
+		err := retry.Do(func() error {
+			// Create timeout context for API call
+			apiCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+
+			var retryErr error
+			orgs, resp, retryErr = app.client.Organizations.List(apiCtx, user, opts)
+			if retryErr != nil {
+				slog.Debug("[SPRINKLER] Organizations.List failed (will retry)", "error", retryErr, "page", opts.Page)
+				return retryErr
+			}
+			return nil
+		},
+			retry.Attempts(maxRetries),
+			retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)),
+			retry.MaxDelay(maxRetryDelay),
+			retry.OnRetry(func(n uint, err error) {
+				slog.Warn("[SPRINKLER] Organizations.List retry", "attempt", n+1, "error", err, "page", opts.Page)
+			}),
+			retry.Context(ctx),
+		)
+		if err != nil {
+			// Gracefully degrade - continue without sprinkler if org fetch fails
+			slog.Warn("[SPRINKLER] Failed to fetch organizations after retries, sprinkler will not start",
+				"error", err,
+				"maxRetries", maxRetries)
+			return nil // Return nil to avoid blocking startup
+		}
+
+		for _, org := range orgs {
+			if org.Login != nil {
+				allOrgs = append(allOrgs, *org.Login)
+			}
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+
+	slog.Info("[SPRINKLER] Discovered user organizations",
+		"user", user,
+		"orgs", allOrgs,
+		"count", len(allOrgs))
+
+	// Update sprinkler with all orgs at once
+	if len(allOrgs) > 0 {
+		app.sprinklerMonitor.updateOrgs(allOrgs)
+		if err := app.sprinklerMonitor.start(); err != nil {
+			return fmt.Errorf("start sprinkler: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // token retrieves the GitHub token from GITHUB_TOKEN env var or gh CLI.
 func (*App) token(ctx context.Context) (string, error) {
 	// Check GITHUB_TOKEN environment variable first
@@ -409,22 +494,6 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 
 	// Only log summary, not individual PRs
 	slog.Info("[GITHUB] GitHub PR summary", "incoming", len(incoming), "outgoing", len(outgoing))
-
-	// Update sprinkler monitor with discovered orgs
-	app.mu.RLock()
-	orgs := make([]string, 0, len(app.seenOrgs))
-	for org := range app.seenOrgs {
-		orgs = append(orgs, org)
-	}
-	app.mu.RUnlock()
-
-	if app.sprinklerMonitor != nil && len(orgs) > 0 {
-		app.sprinklerMonitor.updateOrgs(orgs)
-		// Start monitor if not already running
-		if err := app.sprinklerMonitor.start(); err != nil {
-			slog.Warn("[SPRINKLER] Failed to start monitor", "error", err)
-		}
-	}
 
 	// Fetch Turn API data
 	// Always synchronous now for simplicity - Turn API calls are fast with caching

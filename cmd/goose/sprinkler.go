@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,16 +28,18 @@ const (
 
 // sprinklerMonitor manages WebSocket event subscriptions for all user orgs.
 type sprinklerMonitor struct {
-	app          *App
-	client       *client.Client
-	cancel       context.CancelFunc
-	eventChan    chan string          // Channel for PR URLs that need checking
-	lastEventMap map[string]time.Time // Track last event per URL to dedupe
-	token        string
-	orgs         []string
-	ctx          context.Context
-	mu           sync.RWMutex
-	isRunning    bool
+	app             *App
+	client          *client.Client
+	cancel          context.CancelFunc
+	eventChan       chan string          // Channel for PR URLs that need checking
+	lastEventMap    map[string]time.Time // Track last event per URL to dedupe
+	token           string
+	orgs            []string
+	ctx             context.Context
+	mu              sync.RWMutex
+	isRunning       bool
+	isConnected     bool      // Track WebSocket connection status
+	lastConnectedAt time.Time // Last successful connection time
 }
 
 // newSprinklerMonitor creates a new sprinkler monitor for real-time PR events.
@@ -58,21 +61,58 @@ func (sm *sprinklerMonitor) updateOrgs(orgs []string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Check if orgs changed
-	if len(orgs) == len(sm.orgs) {
+	// Sort both lists for comparison
+	sortedNew := make([]string, len(orgs))
+	copy(sortedNew, orgs)
+	sort.Strings(sortedNew)
+
+	sortedOld := make([]string, len(sm.orgs))
+	copy(sortedOld, sm.orgs)
+	sort.Strings(sortedOld)
+
+	// Check if orgs changed after sorting
+	if len(sortedNew) == len(sortedOld) {
 		same := true
-		for i := range orgs {
-			if orgs[i] != sm.orgs[i] {
+		for i := range sortedNew {
+			if sortedNew[i] != sortedOld[i] {
 				same = false
 				break
 			}
 		}
 		if same {
+			slog.Debug("[SPRINKLER] Org list unchanged (same after sorting)",
+				"orgs", sortedNew,
+				"count", len(sortedNew))
 			return // No change
 		}
 	}
 
-	slog.Info("[SPRINKLER] Updating monitored organizations", "orgs", orgs)
+	// Find what changed
+	added := []string{}
+	removed := []string{}
+	oldMap := make(map[string]bool)
+	for _, org := range sm.orgs {
+		oldMap[org] = true
+	}
+	newMap := make(map[string]bool)
+	for _, org := range orgs {
+		newMap[org] = true
+		if !oldMap[org] {
+			added = append(added, org)
+		}
+	}
+	for _, org := range sm.orgs {
+		if !newMap[org] {
+			removed = append(removed, org)
+		}
+	}
+
+	slog.Info("[SPRINKLER] Organization list changed",
+		"previous", sm.orgs,
+		"new", orgs,
+		"added", added,
+		"removed", removed)
+
 	sm.orgs = make([]string, len(orgs))
 	copy(sm.orgs, orgs)
 
@@ -127,9 +167,16 @@ func (sm *sprinklerMonitor) start() error {
 		NoReconnect:    false,
 		Logger:         sprinklerLogger,
 		OnConnect: func() {
+			sm.mu.Lock()
+			sm.isConnected = true
+			sm.lastConnectedAt = time.Now()
+			sm.mu.Unlock()
 			slog.Info("[SPRINKLER] WebSocket connected")
 		},
 		OnDisconnect: func(err error) {
+			sm.mu.Lock()
+			sm.isConnected = false
+			sm.mu.Unlock()
 			if err != nil && !errors.Is(err, context.Canceled) {
 				slog.Warn("[SPRINKLER] WebSocket disconnected", "error", err)
 			}
@@ -269,12 +316,29 @@ func (sm *sprinklerMonitor) handleEvent(event client.Event) {
 
 // processEvents handles PR events by checking if they're blocking and notifying.
 func (sm *sprinklerMonitor) processEvents() {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("[SPRINKLER] Event processor panic",
+				"panic", r)
+		}
+	}()
+
 	for {
 		select {
 		case <-sm.ctx.Done():
 			return
 		case prURL := <-sm.eventChan:
-			sm.checkAndNotify(prURL)
+			// Process each event with panic recovery
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("[SPRINKLER] Event processing panic",
+							"panic", r,
+							"url", prURL)
+					}
+				}()
+				sm.checkAndNotify(prURL)
+			}()
 		}
 	}
 }
@@ -548,6 +612,13 @@ func (sm *sprinklerMonitor) stop() {
 	slog.Info("[SPRINKLER] Stopping event monitor")
 	sm.cancel()
 	sm.isRunning = false
+}
+
+// connectionStatus returns the current WebSocket connection status.
+func (sm *sprinklerMonitor) connectionStatus() (connected bool, lastConnectedAt time.Time) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.isConnected, sm.lastConnectedAt
 }
 
 // parseRepoAndNumberFromURL extracts repo and PR number from URL.
