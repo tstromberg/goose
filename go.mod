@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/codeGROOVE-dev/retry v1.2.0
-	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251006230512-cc6accef7f7a
+	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251007014926-7fed60b70e75
 	github.com/codeGROOVE-dev/turnclient v0.0.0-20251001194229-2aaea2e63cc7
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
