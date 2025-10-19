@@ -275,10 +275,55 @@ func (sm *sprinklerMonitor) processEvents(ctx context.Context) {
 }
 
 // checkAndNotify checks if a PR is blocking and sends notification if needed.
-func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, prURL string) {
-	startTime := time.Now()
+func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, url string) {
+	start := time.Now()
 
-	// Get current user
+	user := sm.currentUser()
+	if user == "" {
+		slog.Debug("[SPRINKLER] Skipping check - no user configured", "url", url)
+		return
+	}
+
+	repo, n := parseRepoAndNumberFromURL(url)
+	if repo == "" || n == 0 {
+		slog.Warn("[SPRINKLER] Failed to parse PR URL", "url", url)
+		return
+	}
+
+	data, cached := sm.fetchTurnData(ctx, url, repo, n, start)
+	if data == nil {
+		return
+	}
+
+	if sm.handleClosedPR(ctx, data, url, repo, n, cached) {
+		return
+	}
+
+	act := validateUserAction(data, user, repo, n, cached)
+	if act == nil {
+		return
+	}
+
+	if sm.handleNewPR(ctx, url, repo, n, act) {
+		return
+	}
+
+	if sm.isAlreadyTrackedAsBlocked(url, repo, n) {
+		return
+	}
+
+	slog.Info("[SPRINKLER] Blocking PR detected via event",
+		"repo", repo,
+		"number", n,
+		"action", act.Kind,
+		"reason", act.Reason,
+		"elapsed", time.Since(start).Round(time.Millisecond))
+
+	sm.sendNotifications(ctx, url, repo, n, act)
+}
+
+// currentUser returns the configured user for the sprinkler monitor.
+func (sm *sprinklerMonitor) currentUser() string {
 	user := ""
 	if sm.app.currentUser != nil {
 		user = sm.app.currentUser.GetLogin()
@@ -286,250 +331,240 @@ func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, prURL string) {
 	if sm.app.targetUser != "" {
 		user = sm.app.targetUser
 	}
-	if user == "" {
-		slog.Debug("[SPRINKLER] Skipping check - no user configured", "url", prURL)
-		return
-	}
+	return user
+}
 
-	// Extract repo and number early for better logging
-	repo, number := parseRepoAndNumberFromURL(prURL)
-	if repo == "" || number == 0 {
-		slog.Warn("[SPRINKLER] Failed to parse PR URL", "url", prURL)
-		return
-	}
-
-	// Check Turn server for PR status with retry logic
-	var turnData *turn.CheckResponse
-	var wasFromCache bool
+// fetchTurnData retrieves PR data from Turn API with retry logic.
+func (sm *sprinklerMonitor) fetchTurnData(ctx context.Context, url, repo string, n int, start time.Time) (*turn.CheckResponse, bool) {
+	var data *turn.CheckResponse
+	var cached bool
 
 	err := retry.Do(func() error {
-		var retryErr error
-		turnData, wasFromCache, retryErr = sm.app.turnData(ctx, prURL, time.Now())
-		if retryErr != nil {
+		var err error
+		data, cached, err = sm.app.turnData(ctx, url, time.Now())
+		if err != nil {
 			slog.Debug("[SPRINKLER] Turn API call failed (will retry)",
-				"repo", repo, "number", number, "error", retryErr)
-			return retryErr
+				"repo", repo, "number", n, "error", err)
+			return err
 		}
 		return nil
 	},
 		retry.Attempts(sprinklerMaxRetries),
 		retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)),
 		retry.MaxDelay(sprinklerMaxDelay),
-		retry.OnRetry(func(n uint, err error) {
+		retry.OnRetry(func(attempt uint, err error) {
 			slog.Warn("[SPRINKLER] Retrying Turn API call",
-				"attempt", n+1,
+				"attempt", attempt+1,
 				"repo", repo,
-				"number", number,
+				"number", n,
 				"error", err)
 		}),
 		retry.Context(ctx),
 	)
 	if err != nil {
-		// Log error but don't block - the next polling cycle will catch it
 		slog.Warn("[SPRINKLER] Failed to get turn data after retries",
 			"repo", repo,
-			"number", number,
-			"elapsed", time.Since(startTime).Round(time.Millisecond),
+			"number", n,
+			"elapsed", time.Since(start).Round(time.Millisecond),
 			"error", err)
-		return
+		return nil, false
 	}
 
-	// Log Turn API response details
-	prState := ""
-	prIsMerged := false
-	if turnData != nil {
-		prState = turnData.PullRequest.State
-		prIsMerged = turnData.PullRequest.Merged
+	return data, cached
+}
+
+// handleClosedPR processes closed or merged PRs and returns true if the PR was closed.
+func (sm *sprinklerMonitor) handleClosedPR(
+	ctx context.Context, data *turn.CheckResponse, url, repo string, n int, cached bool,
+) bool {
+	state := ""
+	merged := false
+	if data != nil {
+		state = data.PullRequest.State
+		merged = data.PullRequest.Merged
 	}
 
 	slog.Info("[SPRINKLER] Turn API response",
 		"repo", repo,
-		"number", number,
-		"cached", wasFromCache,
-		"state", prState,
-		"merged", prIsMerged,
-		"has_data", turnData != nil,
-		"has_analysis", turnData != nil && turnData.Analysis.NextAction != nil)
+		"number", n,
+		"cached", cached,
+		"state", state,
+		"merged", merged,
+		"has_data", data != nil,
+		"has_analysis", data != nil && data.Analysis.NextAction != nil)
 
-	// Skip closed/merged PRs and remove from lists immediately
-	if prState == "closed" || prIsMerged {
-		sm.removeClosedPR(ctx, prURL, repo, number, prState, prIsMerged)
-		return
+	if state == "closed" || merged {
+		sm.removeClosedPR(ctx, url, repo, n, state, merged)
+		return true
 	}
 
-	if turnData == nil || turnData.Analysis.NextAction == nil {
+	return false
+}
+
+// validateUserAction checks if the user needs to take action and returns the action if critical.
+func validateUserAction(data *turn.CheckResponse, user, repo string, n int, cached bool) *turn.Action {
+	if data == nil || data.Analysis.NextAction == nil {
 		slog.Debug("[SPRINKLER] No turn data available",
 			"repo", repo,
-			"number", number,
-			"cached", wasFromCache)
-		return
+			"number", n,
+			"cached", cached)
+		return nil
 	}
 
-	// Check if user needs to take action
-	action, exists := turnData.Analysis.NextAction[user]
+	act, exists := data.Analysis.NextAction[user]
 	if !exists {
 		slog.Debug("[SPRINKLER] No action required for user",
 			"repo", repo,
-			"number", number,
+			"number", n,
 			"user", user,
-			"state", prState)
-		return
+			"state", data.PullRequest.State)
+		return nil
 	}
 
-	if !action.Critical {
+	if !act.Critical {
 		slog.Debug("[SPRINKLER] Non-critical action, skipping notification",
 			"repo", repo,
-			"number", number,
-			"action", action.Kind,
-			"critical", action.Critical)
-		return
+			"number", n,
+			"action", act.Kind,
+			"critical", act.Critical)
+		return nil
 	}
 
-	// Check if PR exists in our lists
+	return &act
+}
+
+// handleNewPR triggers a refresh for PRs not in our lists and returns true if handled.
+func (sm *sprinklerMonitor) handleNewPR(ctx context.Context, url, repo string, n int, act *turn.Action) bool {
 	sm.app.mu.RLock()
-	foundIncoming := false
-	foundOutgoing := false
-	for i := range sm.app.incoming {
-		if sm.app.incoming[i].URL == prURL {
-			foundIncoming = true
-			break
-		}
-	}
-	if !foundIncoming {
-		for i := range sm.app.outgoing {
-			if sm.app.outgoing[i].URL == prURL {
-				foundOutgoing = true
-				break
-			}
-		}
+	inIncoming := findPRInList(sm.app.incoming, url)
+	inOutgoing := false
+	if !inIncoming {
+		inOutgoing = findPRInList(sm.app.outgoing, url)
 	}
 	sm.app.mu.RUnlock()
 
-	// If PR not found in our lists, trigger a refresh to fetch it
-	if !foundIncoming && !foundOutgoing {
+	if !inIncoming && !inOutgoing {
 		slog.Info("[SPRINKLER] New PR detected, triggering refresh",
 			"repo", repo,
-			"number", number,
-			"action", action.Kind)
+			"number", n,
+			"action", act.Kind)
 		go sm.app.updatePRs(ctx)
-		return // Let the refresh handle everything
+		return true
 	}
 
-	slog.Info("[SPRINKLER] Blocking PR detected via event",
-		"repo", repo,
-		"number", number,
-		"action", action.Kind,
-		"reason", action.Reason,
-		"elapsed", time.Since(startTime).Round(time.Millisecond))
+	return false
+}
 
-	// Check if we already know about this PR being blocked
+// findPRInList searches for a PR URL in the given list.
+func findPRInList(prs []PR, url string) bool {
+	for i := range prs {
+		if prs[i].URL == url {
+			return true
+		}
+	}
+	return false
+}
+
+// isAlreadyTrackedAsBlocked checks if the PR is already tracked as blocked.
+func (sm *sprinklerMonitor) isAlreadyTrackedAsBlocked(url, repo string, n int) bool {
 	sm.app.mu.RLock()
-	found := false
+	defer sm.app.mu.RUnlock()
+
 	for i := range sm.app.incoming {
-		if sm.app.incoming[i].URL == prURL && sm.app.incoming[i].IsBlocked {
-			found = true
-			slog.Debug("[SPRINKLER] Found in incoming blocked PRs", "repo", repo, "number", number)
-			break
+		if sm.app.incoming[i].URL == url && sm.app.incoming[i].IsBlocked {
+			slog.Debug("[SPRINKLER] Found in incoming blocked PRs", "repo", repo, "number", n)
+			return true
 		}
 	}
-	if !found {
-		for i := range sm.app.outgoing {
-			if sm.app.outgoing[i].URL == prURL && sm.app.outgoing[i].IsBlocked {
-				found = true
-				slog.Debug("[SPRINKLER] Found in outgoing blocked PRs", "repo", repo, "number", number)
-				break
-			}
+
+	for i := range sm.app.outgoing {
+		if sm.app.outgoing[i].URL == url && sm.app.outgoing[i].IsBlocked {
+			slog.Debug("[SPRINKLER] Found in outgoing blocked PRs", "repo", repo, "number", n)
+			return true
 		}
 	}
-	sm.app.mu.RUnlock()
 
-	if found {
-		slog.Debug("[SPRINKLER] Already tracking as blocked, skipping notification",
-			"repo", repo,
-			"number", number)
-		return
-	}
+	return false
+}
 
-	// Send notification
-	title := fmt.Sprintf("PR Event: #%d needs %s", number, action.Kind)
-	message := fmt.Sprintf("%s #%d - %s", repo, number, action.Reason)
+// sendNotifications sends desktop notification, plays sound, and attempts auto-open.
+func (sm *sprinklerMonitor) sendNotifications(ctx context.Context, url, repo string, n int, act *turn.Action) {
+	title := fmt.Sprintf("PR Event: #%d needs %s", n, act.Kind)
+	msg := fmt.Sprintf("%s #%d - %s", repo, n, act.Reason)
 
-	// Send desktop notification
 	go func() {
-		if err := beeep.Notify(title, message, ""); err != nil {
+		if err := beeep.Notify(title, msg, ""); err != nil {
 			slog.Warn("[SPRINKLER] Failed to send desktop notification",
 				"repo", repo,
-				"number", number,
+				"number", n,
 				"error", err)
 		} else {
 			slog.Info("[SPRINKLER] Sent desktop notification",
 				"repo", repo,
-				"number", number)
+				"number", n)
 		}
 	}()
 
-	// Play sound if enabled
 	if sm.app.enableAudioCues && time.Since(sm.app.startTime) > startupGracePeriod {
 		slog.Debug("[SPRINKLER] Playing notification sound",
 			"repo", repo,
-			"number", number,
+			"number", n,
 			"soundType", "honk")
 		sm.app.playSound(ctx, "honk")
 	}
 
-	// Try auto-open if enabled
 	if sm.app.enableAutoBrowser {
 		slog.Debug("[SPRINKLER] Attempting auto-open",
 			"repo", repo,
-			"number", number)
+			"number", n)
 		sm.app.tryAutoOpenPR(ctx, &PR{
-			URL:        prURL,
+			URL:        url,
 			Repository: repo,
-			Number:     number,
+			Number:     n,
 			IsBlocked:  true,
-			ActionKind: string(action.Kind),
+			ActionKind: string(act.Kind),
 		}, sm.app.enableAutoBrowser, sm.app.startTime)
 	}
 }
 
 // removeClosedPR removes a closed or merged PR from the in-memory lists.
-func (sm *sprinklerMonitor) removeClosedPR(ctx context.Context, prURL, repo string, number int, prState string, prIsMerged bool) {
+func (sm *sprinklerMonitor) removeClosedPR(ctx context.Context, url, repo string, n int, state string, merged bool) {
 	slog.Info("[SPRINKLER] PR closed/merged, removing from lists",
 		"repo", repo,
-		"number", number,
-		"state", prState,
-		"merged", prIsMerged,
-		"url", prURL)
+		"number", n,
+		"state", state,
+		"merged", merged,
+		"url", url)
 
 	// Remove from in-memory lists immediately
 	sm.app.mu.Lock()
-	originalIncoming := len(sm.app.incoming)
-	originalOutgoing := len(sm.app.outgoing)
+	inBefore := len(sm.app.incoming)
+	outBefore := len(sm.app.outgoing)
 
 	// Filter out this PR from incoming
-	filteredIncoming := make([]PR, 0, len(sm.app.incoming))
+	in := make([]PR, 0, len(sm.app.incoming))
 	for i := range sm.app.incoming {
-		if sm.app.incoming[i].URL != prURL {
-			filteredIncoming = append(filteredIncoming, sm.app.incoming[i])
+		if sm.app.incoming[i].URL != url {
+			in = append(in, sm.app.incoming[i])
 		}
 	}
-	sm.app.incoming = filteredIncoming
+	sm.app.incoming = in
 
 	// Filter out this PR from outgoing
-	filteredOutgoing := make([]PR, 0, len(sm.app.outgoing))
+	out := make([]PR, 0, len(sm.app.outgoing))
 	for i := range sm.app.outgoing {
-		if sm.app.outgoing[i].URL != prURL {
-			filteredOutgoing = append(filteredOutgoing, sm.app.outgoing[i])
+		if sm.app.outgoing[i].URL != url {
+			out = append(out, sm.app.outgoing[i])
 		}
 	}
-	sm.app.outgoing = filteredOutgoing
+	sm.app.outgoing = out
 	sm.app.mu.Unlock()
 
 	slog.Info("[SPRINKLER] Removed PR from lists",
-		"url", prURL,
-		"incoming_before", originalIncoming,
+		"url", url,
+		"incoming_before", inBefore,
 		"incoming_after", len(sm.app.incoming),
-		"outgoing_before", originalOutgoing,
+		"outgoing_before", outBefore,
 		"outgoing_after", len(sm.app.outgoing))
 
 	// Update UI to reflect removal
