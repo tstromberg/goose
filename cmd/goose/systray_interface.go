@@ -55,9 +55,9 @@ func (*RealSystray) Quit() {
 
 // MockSystray implements SystrayInterface for testing.
 type MockSystray struct {
-	mu        sync.Mutex
 	title     string
 	menuItems []string
+	mu        sync.Mutex
 }
 
 func (m *MockSystray) ResetMenu() {
@@ -89,7 +89,7 @@ func (m *MockSystray) SetTitle(title string) {
 	m.title = title
 }
 
-func (*MockSystray) SetIcon(iconBytes []byte) {
+func (*MockSystray) SetIcon(_ []byte) {
 	// No-op for testing
 }
 

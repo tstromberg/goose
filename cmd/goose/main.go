@@ -84,9 +84,11 @@ type App struct {
 	turnClient                   *turn.Client
 	sprinklerMonitor             *sprinklerMonitor
 	previousBlockedPRs           map[string]bool
-	authError                    string
-	lastFetchError               string
+	githubCircuit                *circuitBreaker
+	healthMonitor                *healthMonitor
 	cacheDir                     string
+	lastFetchError               string
+	authError                    string
 	targetUser                   string
 	lastMenuTitles               []string
 	outgoing                     []PR
@@ -94,17 +96,15 @@ type App struct {
 	updateInterval               time.Duration
 	consecutiveFailures          int
 	mu                           sync.RWMutex
-	menuMutex                    sync.Mutex // Mutex to prevent concurrent menu rebuilds
-	updateMutex                  sync.Mutex // Mutex to prevent concurrent PR updates
-	enableAutoBrowser            bool
+	updateMutex                  sync.Mutex
+	menuMutex                    sync.Mutex
 	hideStaleIncoming            bool
-	hasPerformedInitialDiscovery bool // Track if we've done the first poll to distinguish from real state changes
+	hasPerformedInitialDiscovery bool
 	noCache                      bool
 	enableAudioCues              bool
 	initialLoadComplete          bool
 	menuInitialized              bool
-	healthMonitor                *healthMonitor
-	githubCircuit                *circuitBreaker
+	enableAutoBrowser            bool
 }
 
 func main() {
@@ -165,7 +165,10 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
 	slog.Info("Starting Goose", "version", version, "commit", commit, "date", date)
 	slog.Info("Configuration", "update_interval", updateInterval, "max_retries", maxRetries, "max_delay", maxRetryDelay)
-	slog.Info("Browser auto-open configuration", "startup_delay", browserOpenDelay, "max_per_minute", maxBrowserOpensMinute, "max_per_day", maxBrowserOpensDay)
+	slog.Info("Browser auto-open configuration",
+		"startup_delay", browserOpenDelay,
+		"max_per_minute", maxBrowserOpensMinute,
+		"max_per_day", maxBrowserOpensDay)
 
 	ctx := context.Background()
 
@@ -262,12 +265,13 @@ func main() {
 			}),
 			retry.Context(ctx),
 		)
-		if err != nil {
+		switch {
+		case err != nil:
 			slog.Warn("Failed to load current user after retries", "maxRetries", maxRetries, "error", err)
 			if app.authError == "" {
 				app.authError = fmt.Sprintf("Failed to load user: %v", err)
 			}
-		} else if user != nil {
+		case user != nil:
 			app.currentUser = user
 			// Log if we're using a different target user (sanitized)
 			if app.targetUser != "" && app.targetUser != user.GetLogin() {
@@ -280,7 +284,7 @@ func main() {
 					slog.Warn("[SPRINKLER] Failed to initialize organizations", "error", err)
 				}
 			}()
-		} else {
+		default:
 			slog.Warn("GitHub API returned nil user")
 		}
 	} else {
@@ -300,6 +304,70 @@ func main() {
 		}
 		app.cleanupOldCache()
 	})
+}
+
+// handleReauthentication attempts to re-authenticate when auth errors occur.
+func (app *App) handleReauthentication(ctx context.Context) {
+	// Try to reinitialize clients which will attempt to get token via gh auth token
+	if err := app.initClients(ctx); err != nil {
+		slog.Warn("[CLICK] Re-authentication failed", "error", err)
+		app.mu.Lock()
+		app.authError = err.Error()
+		app.mu.Unlock()
+		return
+	}
+
+	// Success! Clear auth error and reload user
+	slog.Info("[CLICK] Re-authentication successful")
+	app.mu.Lock()
+	app.authError = ""
+	app.mu.Unlock()
+
+	// Load current user
+	if app.client != nil {
+		var user *github.User
+		err := retry.Do(func() error {
+			var retryErr error
+			user, _, retryErr = app.client.Users.Get(ctx, "")
+			if retryErr != nil {
+				slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
+				return retryErr
+			}
+			return nil
+		},
+			retry.Attempts(maxRetries),
+			retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)),
+			retry.MaxDelay(maxRetryDelay),
+			retry.OnRetry(func(n uint, err error) {
+				slog.Debug("[RETRY] Retrying GitHub API call", "attempt", n, "error", err)
+			}),
+		)
+		if err == nil && user != nil {
+			if app.targetUser == "" {
+				app.targetUser = user.GetLogin()
+				slog.Info("Set target user to current user", "user", app.targetUser)
+			}
+		}
+	}
+
+	// Update tooltip
+	tooltip := "Goose - Loading PRs..."
+	if app.targetUser != "" {
+		tooltip = fmt.Sprintf("Goose - Loading PRs... (@%s)", app.targetUser)
+	}
+	systray.SetTooltip(tooltip)
+
+	// Rebuild menu to remove error state
+	app.rebuildMenu(ctx)
+
+	// Start update loop if not already running
+	if !app.menuInitialized {
+		app.menuInitialized = true
+		go app.updateLoop(ctx)
+	} else {
+		// Just do a single update to refresh data
+		go app.updatePRs(ctx)
+	}
 }
 
 func (app *App) onReady(ctx context.Context) {
@@ -334,67 +402,7 @@ func (app *App) onReady(ctx context.Context) {
 
 		if hasAuthError {
 			slog.Info("[CLICK] Auth error detected, attempting to re-authenticate")
-			go func() {
-				// Try to reinitialize clients which will attempt to get token via gh auth token
-				if err := app.initClients(ctx); err != nil {
-					slog.Warn("[CLICK] Re-authentication failed", "error", err)
-					app.mu.Lock()
-					app.authError = err.Error()
-					app.mu.Unlock()
-				} else {
-					// Success! Clear auth error and reload user
-					slog.Info("[CLICK] Re-authentication successful")
-					app.mu.Lock()
-					app.authError = ""
-					app.mu.Unlock()
-
-					// Load current user
-					if app.client != nil {
-						var user *github.User
-						err := retry.Do(func() error {
-							var retryErr error
-							user, _, retryErr = app.client.Users.Get(ctx, "")
-							if retryErr != nil {
-								slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
-								return retryErr
-							}
-							return nil
-						},
-							retry.Attempts(maxRetries),
-							retry.DelayType(retry.CombineDelay(retry.BackOffDelay, retry.RandomDelay)),
-							retry.MaxDelay(maxRetryDelay),
-							retry.OnRetry(func(n uint, err error) {
-								slog.Debug("[RETRY] Retrying GitHub API call", "attempt", n, "error", err)
-							}),
-						)
-						if err == nil && user != nil {
-							if app.targetUser == "" {
-								app.targetUser = user.GetLogin()
-								slog.Info("Set target user to current user", "user", app.targetUser)
-							}
-						}
-					}
-
-					// Update tooltip
-					tooltip := "Goose - Loading PRs..."
-					if app.targetUser != "" {
-						tooltip = fmt.Sprintf("Goose - Loading PRs... (@%s)", app.targetUser)
-					}
-					systray.SetTooltip(tooltip)
-
-					// Rebuild menu to remove error state
-					app.rebuildMenu(ctx)
-
-					// Start update loop if not already running
-					if !app.menuInitialized {
-						app.menuInitialized = true
-						go app.updateLoop(ctx)
-					} else {
-						// Just do a single update to refresh data
-						go app.updatePRs(ctx)
-					}
-				}
-			}()
+			go app.handleReauthentication(ctx)
 		} else {
 			// Normal operation - check if we can perform a forced refresh
 			app.mu.RLock()
@@ -637,15 +645,15 @@ func (app *App) updatePRs(ctx context.Context) {
 		"outgoing_count", len(outgoing))
 	// Log ALL outgoing PRs for debugging
 	slog.Debug("[UPDATE] Listing ALL outgoing PRs for debugging")
-	for i, pr := range outgoing {
+	for i := range outgoing {
 		slog.Debug("[UPDATE] Outgoing PR details",
 			"index", i,
-			"repo", pr.Repository,
-			"number", pr.Number,
-			"blocked", pr.IsBlocked,
-			"updated_at", pr.UpdatedAt.Format(time.RFC3339),
-			"title", pr.Title,
-			"url", pr.URL)
+			"repo", outgoing[i].Repository,
+			"number", outgoing[i].Number,
+			"blocked", outgoing[i].IsBlocked,
+			"updated_at", outgoing[i].UpdatedAt.Format(time.RFC3339),
+			"title", outgoing[i].Title,
+			"url", outgoing[i].URL)
 	}
 	// Mark initial load as complete after first successful update
 	if !app.initialLoadComplete {
@@ -831,7 +839,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 }
 
 // tryAutoOpenPR attempts to open a PR in the browser if enabled and rate limits allow.
-func (app *App) tryAutoOpenPR(ctx context.Context, pr PR, autoBrowserEnabled bool, startTime time.Time) {
+func (app *App) tryAutoOpenPR(ctx context.Context, pr *PR, autoBrowserEnabled bool, startTime time.Time) {
 	slog.Debug("[BROWSER] tryAutoOpenPR called",
 		"repo", pr.Repository,
 		"number", pr.Number,

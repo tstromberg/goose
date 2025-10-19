@@ -1,6 +1,5 @@
 //go:build darwin
 
-// Package main - loginitem_darwin.go provides macOS-specific login item management.
 package main
 
 import (

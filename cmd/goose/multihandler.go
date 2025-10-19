@@ -21,10 +21,15 @@ func (h *MultiHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 // Handle writes the record to all handlers.
+//
+//nolint:gocritic // record is an interface parameter, cannot change to pointer
 func (h *MultiHandler) Handle(ctx context.Context, record slog.Record) error {
 	for _, handler := range h.handlers {
 		if handler.Enabled(ctx, record.Level) {
-			handler.Handle(ctx, record) //nolint:errcheck // Continue logging to other destinations
+			if err := handler.Handle(ctx, record); err != nil {
+				// Continue logging to other destinations even if one fails
+				_ = err
+			}
 		}
 	}
 	return nil

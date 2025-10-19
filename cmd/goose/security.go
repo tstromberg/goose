@@ -1,4 +1,3 @@
-// Package main - security.go provides security utilities and validation functions.
 package main
 
 import (
@@ -152,13 +151,13 @@ func validateGitHubPRURL(rawURL string) error {
 	// Exception: %3D which is = in URL encoding, only as part of ?goose parameter
 	if strings.Contains(rawURL, "%") {
 		// Allow URL encoding only in the goose parameter value
-		if idx := strings.Index(rawURL, "?goose="); idx != -1 {
-			// Check if encoding is only in the goose parameter
-			if strings.Contains(rawURL[:idx], "%") {
-				return errors.New("URL contains encoded characters outside goose parameter")
-			}
-		} else {
+		idx := strings.Index(rawURL, "?goose=")
+		if idx == -1 {
 			return errors.New("URL contains encoded characters")
+		}
+		// Check if encoding is only in the goose parameter
+		if strings.Contains(rawURL[:idx], "%") {
+			return errors.New("URL contains encoded characters outside goose parameter")
 		}
 	}
 

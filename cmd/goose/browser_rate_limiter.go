@@ -1,4 +1,3 @@
-// Package main implements browser rate limiting for PR auto-open feature.
 package main
 
 import (

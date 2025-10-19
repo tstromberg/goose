@@ -1,4 +1,3 @@
-// Package main - settings.go provides persistent settings storage.
 package main
 
 import (
