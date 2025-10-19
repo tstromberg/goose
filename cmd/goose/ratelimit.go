@@ -1,4 +1,3 @@
-// Package main - ratelimit.go provides rate limiting functionality.
 package main
 
 import (

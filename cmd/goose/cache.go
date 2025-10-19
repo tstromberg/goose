@@ -1,4 +1,3 @@
-// Package main - cache.go provides caching functionality for Turn API responses.
 package main
 
 import (
@@ -23,6 +22,70 @@ type cacheEntry struct {
 	UpdatedAt time.Time           `json:"updated_at"`
 }
 
+// checkCache checks the cache for a PR and returns the cached data if valid.
+// Returns (cachedData, cacheHit, hasRunningTests).
+func (app *App) checkCache(cacheFile, url string, updatedAt time.Time) (cachedData *turn.CheckResponse, cacheHit bool, hasRunningTests bool) {
+	fileData, readErr := os.ReadFile(cacheFile)
+	if readErr != nil {
+		if !os.IsNotExist(readErr) {
+			slog.Debug("[CACHE] Cache file read error", "url", url, "error", readErr)
+		}
+		return nil, false, false
+	}
+
+	var entry cacheEntry
+	if unmarshalErr := json.Unmarshal(fileData, &entry); unmarshalErr != nil {
+		slog.Warn("Failed to unmarshal cache data", "url", url, "error", unmarshalErr)
+		// Remove corrupted cache file
+		if removeErr := os.Remove(cacheFile); removeErr != nil {
+			slog.Error("Failed to remove corrupted cache file", "error", removeErr)
+		}
+		return nil, false, false
+	}
+
+	// Check if cache is expired or PR updated
+	if time.Since(entry.CachedAt) >= cacheTTL || !entry.UpdatedAt.Equal(updatedAt) {
+		// Log why cache was invalid
+		if !entry.UpdatedAt.Equal(updatedAt) {
+			slog.Debug("[CACHE] Cache miss - PR updated",
+				"url", url,
+				"cached_pr_time", entry.UpdatedAt.Format(time.RFC3339),
+				"current_pr_time", updatedAt.Format(time.RFC3339))
+		} else {
+			slog.Debug("[CACHE] Cache miss - TTL expired",
+				"url", url,
+				"cached_at", entry.CachedAt.Format(time.RFC3339),
+				"cache_age", time.Since(entry.CachedAt).Round(time.Second),
+				"ttl", cacheTTL)
+		}
+		return nil, false, false
+	}
+
+	// Check for incomplete tests that should invalidate cache
+	cacheAge := time.Since(entry.CachedAt)
+	testState := entry.Data.PullRequest.TestState
+	isTestIncomplete := testState == "running" || testState == "queued" || testState == "pending"
+	if entry.Data != nil && isTestIncomplete && cacheAge < runningTestsCacheBypass {
+		slog.Debug("[CACHE] Cache invalidated - tests incomplete and cache entry is fresh",
+			"url", url,
+			"test_state", testState,
+			"cache_age", cacheAge.Round(time.Minute),
+			"cached_at", entry.CachedAt.Format(time.RFC3339))
+		return nil, false, true
+	}
+
+	// Cache hit
+	slog.Debug("[CACHE] Cache hit",
+		"url", url,
+		"cached_at", entry.CachedAt.Format(time.RFC3339),
+		"cache_age", time.Since(entry.CachedAt).Round(time.Second),
+		"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339))
+	if app.healthMonitor != nil {
+		app.healthMonitor.recordCacheAccess(true)
+	}
+	return entry.Data, true, false
+}
+
 // turnData fetches Turn API data with caching.
 func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, bool, error) {
 	hasRunningTests := false
@@ -45,57 +108,10 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 
 	// Skip cache if --no-cache flag is set
 	if !app.noCache {
-		// Try to read from cache (gracefully handle all cache errors)
-		if data, readErr := os.ReadFile(cacheFile); readErr == nil {
-			var entry cacheEntry
-			if unmarshalErr := json.Unmarshal(data, &entry); unmarshalErr != nil {
-				slog.Warn("Failed to unmarshal cache data", "url", url, "error", unmarshalErr)
-				// Remove corrupted cache file
-				if removeErr := os.Remove(cacheFile); removeErr != nil {
-					slog.Error("Failed to remove corrupted cache file", "error", removeErr)
-				}
-			} else if time.Since(entry.CachedAt) < cacheTTL && entry.UpdatedAt.Equal(updatedAt) {
-				// Check if cache is still valid (10 day TTL, but PR UpdatedAt is primary check)
-				// But invalidate cache for PRs with incomplete tests if cache entry is fresh (< 90 minutes old)
-				cacheAge := time.Since(entry.CachedAt)
-				testState := entry.Data.PullRequest.TestState
-				isTestIncomplete := testState == "running" || testState == "queued" || testState == "pending"
-				if entry.Data != nil && isTestIncomplete && cacheAge < runningTestsCacheBypass {
-					hasRunningTests = true
-					slog.Debug("[CACHE] Cache invalidated - tests incomplete and cache entry is fresh",
-						"url", url,
-						"test_state", testState,
-						"cache_age", cacheAge.Round(time.Minute),
-						"cached_at", entry.CachedAt.Format(time.RFC3339))
-					// Don't return cached data - fall through to fetch fresh data with current time
-				} else {
-					slog.Debug("[CACHE] Cache hit",
-						"url", url,
-						"cached_at", entry.CachedAt.Format(time.RFC3339),
-						"cache_age", time.Since(entry.CachedAt).Round(time.Second),
-						"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339))
-					if app.healthMonitor != nil {
-						app.healthMonitor.recordCacheAccess(true)
-					}
-					return entry.Data, true, nil
-				}
-			} else {
-				// Log why cache was invalid
-				if !entry.UpdatedAt.Equal(updatedAt) {
-					slog.Debug("[CACHE] Cache miss - PR updated",
-						"url", url,
-						"cached_pr_time", entry.UpdatedAt.Format(time.RFC3339),
-						"current_pr_time", updatedAt.Format(time.RFC3339))
-				} else if time.Since(entry.CachedAt) >= cacheTTL {
-					slog.Debug("[CACHE] Cache miss - TTL expired",
-						"url", url,
-						"cached_at", entry.CachedAt.Format(time.RFC3339),
-						"cache_age", time.Since(entry.CachedAt).Round(time.Second),
-						"ttl", cacheTTL)
-				}
-			}
-		} else if !os.IsNotExist(readErr) {
-			slog.Debug("[CACHE] Cache file read error", "url", url, "error", readErr)
+		if cachedData, cacheHit, runningTests := app.checkCache(cacheFile, url, updatedAt); cacheHit {
+			return cachedData, true, nil
+		} else if runningTests {
+			hasRunningTests = true
 		}
 	}
 

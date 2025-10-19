@@ -1,4 +1,3 @@
-// Package main - sprinkler.go contains real-time event monitoring via WebSocket.
 package main
 
 import (
@@ -27,29 +26,25 @@ const (
 
 // sprinklerMonitor manages WebSocket event subscriptions for all user orgs.
 type sprinklerMonitor struct {
+	lastConnectedAt time.Time
 	app             *App
 	client          *client.Client
 	cancel          context.CancelFunc
-	eventChan       chan string          // Channel for PR URLs that need checking
-	lastEventMap    map[string]time.Time // Track last event per URL to dedupe
+	eventChan       chan string
+	lastEventMap    map[string]time.Time
 	token           string
 	orgs            []string
-	ctx             context.Context
 	mu              sync.RWMutex
 	isRunning       bool
-	isConnected     bool      // Track WebSocket connection status
-	lastConnectedAt time.Time // Last successful connection time
+	isConnected     bool
 }
 
 // newSprinklerMonitor creates a new sprinkler monitor for real-time PR events.
 func newSprinklerMonitor(app *App, token string) *sprinklerMonitor {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &sprinklerMonitor{
 		app:          app,
 		token:        token,
 		orgs:         make([]string, 0),
-		ctx:          ctx,
-		cancel:       cancel,
 		eventChan:    make(chan string, eventChannelSize),
 		lastEventMap: make(map[string]time.Time),
 	}
@@ -71,7 +66,7 @@ func (sm *sprinklerMonitor) updateOrgs(orgs []string) {
 }
 
 // start begins monitoring for PR events across all user orgs.
-func (sm *sprinklerMonitor) start() error {
+func (sm *sprinklerMonitor) start(ctx context.Context) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -89,9 +84,13 @@ func (sm *sprinklerMonitor) start() error {
 		"orgs", sm.orgs,
 		"org_count", len(sm.orgs))
 
+	// Create context with cancel for shutdown
+	monitorCtx, cancel := context.WithCancel(ctx)
+	sm.cancel = cancel
+
 	// Create logger that discards output unless debug mode
 	var sprinklerLogger *slog.Logger
-	if slog.Default().Enabled(sm.ctx, slog.LevelDebug) {
+	if slog.Default().Enabled(ctx, slog.LevelDebug) {
 		sprinklerLogger = slog.Default()
 	} else {
 		// Use a handler that discards all logs
@@ -140,7 +139,7 @@ func (sm *sprinklerMonitor) start() error {
 
 	slog.Info("[SPRINKLER] Starting event processor goroutine")
 	// Start event processor
-	go sm.processEvents()
+	go sm.processEvents(monitorCtx)
 
 	slog.Info("[SPRINKLER] Starting WebSocket client goroutine")
 	// Start WebSocket client with error recovery
@@ -156,7 +155,7 @@ func (sm *sprinklerMonitor) start() error {
 		}()
 
 		startTime := time.Now()
-		if err := wsClient.Start(sm.ctx); err != nil && !errors.Is(err, context.Canceled) {
+		if err := wsClient.Start(monitorCtx); err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("[SPRINKLER] WebSocket client error",
 				"error", err,
 				"uptime", time.Since(startTime).Round(time.Second))
@@ -258,7 +257,7 @@ func (sm *sprinklerMonitor) handleEvent(event client.Event) {
 }
 
 // processEvents handles PR events by checking if they're blocking and notifying.
-func (sm *sprinklerMonitor) processEvents() {
+func (sm *sprinklerMonitor) processEvents(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("[SPRINKLER] Event processor panic", "panic", r)
@@ -267,16 +266,16 @@ func (sm *sprinklerMonitor) processEvents() {
 
 	for {
 		select {
-		case <-sm.ctx.Done():
+		case <-ctx.Done():
 			return
 		case prURL := <-sm.eventChan:
-			sm.checkAndNotify(prURL)
+			sm.checkAndNotify(ctx, prURL)
 		}
 	}
 }
 
 // checkAndNotify checks if a PR is blocking and sends notification if needed.
-func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
+func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, prURL string) {
 	startTime := time.Now()
 
 	// Get current user
@@ -305,7 +304,7 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 
 	err := retry.Do(func() error {
 		var retryErr error
-		turnData, wasFromCache, retryErr = sm.app.turnData(sm.ctx, prURL, time.Now())
+		turnData, wasFromCache, retryErr = sm.app.turnData(ctx, prURL, time.Now())
 		if retryErr != nil {
 			slog.Debug("[SPRINKLER] Turn API call failed (will retry)",
 				"repo", repo, "number", number, "error", retryErr)
@@ -323,7 +322,7 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 				"number", number,
 				"error", err)
 		}),
-		retry.Context(sm.ctx),
+		retry.Context(ctx),
 	)
 	if err != nil {
 		// Log error but don't block - the next polling cycle will catch it
@@ -354,46 +353,7 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 
 	// Skip closed/merged PRs and remove from lists immediately
 	if prState == "closed" || prIsMerged {
-		slog.Info("[SPRINKLER] PR closed/merged, removing from lists",
-			"repo", repo,
-			"number", number,
-			"state", prState,
-			"merged", prIsMerged,
-			"url", prURL)
-
-		// Remove from in-memory lists immediately
-		sm.app.mu.Lock()
-		originalIncoming := len(sm.app.incoming)
-		originalOutgoing := len(sm.app.outgoing)
-
-		// Filter out this PR from incoming
-		filteredIncoming := make([]PR, 0, len(sm.app.incoming))
-		for _, pr := range sm.app.incoming {
-			if pr.URL != prURL {
-				filteredIncoming = append(filteredIncoming, pr)
-			}
-		}
-		sm.app.incoming = filteredIncoming
-
-		// Filter out this PR from outgoing
-		filteredOutgoing := make([]PR, 0, len(sm.app.outgoing))
-		for _, pr := range sm.app.outgoing {
-			if pr.URL != prURL {
-				filteredOutgoing = append(filteredOutgoing, pr)
-			}
-		}
-		sm.app.outgoing = filteredOutgoing
-		sm.app.mu.Unlock()
-
-		slog.Info("[SPRINKLER] Removed PR from lists",
-			"url", prURL,
-			"incoming_before", originalIncoming,
-			"incoming_after", len(sm.app.incoming),
-			"outgoing_before", originalOutgoing,
-			"outgoing_after", len(sm.app.outgoing))
-
-		// Update UI to reflect removal
-		sm.app.updateMenu(sm.ctx)
+		sm.removeClosedPR(ctx, prURL, repo, number, prState, prIsMerged)
 		return
 	}
 
@@ -451,7 +411,7 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 			"repo", repo,
 			"number", number,
 			"action", action.Kind)
-		go sm.app.updatePRs(sm.ctx)
+		go sm.app.updatePRs(ctx)
 		return // Let the refresh handle everything
 	}
 
@@ -514,7 +474,7 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 			"repo", repo,
 			"number", number,
 			"soundType", "honk")
-		sm.app.playSound(sm.ctx, "honk")
+		sm.app.playSound(ctx, "honk")
 	}
 
 	// Try auto-open if enabled
@@ -522,7 +482,7 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 		slog.Debug("[SPRINKLER] Attempting auto-open",
 			"repo", repo,
 			"number", number)
-		sm.app.tryAutoOpenPR(sm.ctx, PR{
+		sm.app.tryAutoOpenPR(ctx, &PR{
 			URL:        prURL,
 			Repository: repo,
 			Number:     number,
@@ -530,6 +490,50 @@ func (sm *sprinklerMonitor) checkAndNotify(prURL string) {
 			ActionKind: string(action.Kind),
 		}, sm.app.enableAutoBrowser, sm.app.startTime)
 	}
+}
+
+// removeClosedPR removes a closed or merged PR from the in-memory lists.
+func (sm *sprinklerMonitor) removeClosedPR(ctx context.Context, prURL, repo string, number int, prState string, prIsMerged bool) {
+	slog.Info("[SPRINKLER] PR closed/merged, removing from lists",
+		"repo", repo,
+		"number", number,
+		"state", prState,
+		"merged", prIsMerged,
+		"url", prURL)
+
+	// Remove from in-memory lists immediately
+	sm.app.mu.Lock()
+	originalIncoming := len(sm.app.incoming)
+	originalOutgoing := len(sm.app.outgoing)
+
+	// Filter out this PR from incoming
+	filteredIncoming := make([]PR, 0, len(sm.app.incoming))
+	for i := range sm.app.incoming {
+		if sm.app.incoming[i].URL != prURL {
+			filteredIncoming = append(filteredIncoming, sm.app.incoming[i])
+		}
+	}
+	sm.app.incoming = filteredIncoming
+
+	// Filter out this PR from outgoing
+	filteredOutgoing := make([]PR, 0, len(sm.app.outgoing))
+	for i := range sm.app.outgoing {
+		if sm.app.outgoing[i].URL != prURL {
+			filteredOutgoing = append(filteredOutgoing, sm.app.outgoing[i])
+		}
+	}
+	sm.app.outgoing = filteredOutgoing
+	sm.app.mu.Unlock()
+
+	slog.Info("[SPRINKLER] Removed PR from lists",
+		"url", prURL,
+		"incoming_before", originalIncoming,
+		"incoming_after", len(sm.app.incoming),
+		"outgoing_before", originalOutgoing,
+		"outgoing_after", len(sm.app.outgoing))
+
+	// Update UI to reflect removal
+	sm.app.updateMenu(ctx)
 }
 
 // stop stops the sprinkler monitor.

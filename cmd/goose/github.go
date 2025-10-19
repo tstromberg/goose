@@ -1,4 +1,3 @@
-// Package main - github.go contains GitHub API integration functions.
 package main
 
 import (
@@ -62,7 +61,7 @@ func (app *App) initClients(ctx context.Context) error {
 // initSprinklerOrgs fetches the user's organizations and starts sprinkler monitoring.
 func (app *App) initSprinklerOrgs(ctx context.Context) error {
 	if app.client == nil || app.sprinklerMonitor == nil {
-		return fmt.Errorf("client or sprinkler not initialized")
+		return errors.New("client or sprinkler not initialized")
 	}
 
 	// Get current user
@@ -74,7 +73,7 @@ func (app *App) initSprinklerOrgs(ctx context.Context) error {
 		user = app.targetUser
 	}
 	if user == "" {
-		return fmt.Errorf("no user configured")
+		return errors.New("no user configured")
 	}
 
 	slog.Info("[SPRINKLER] Fetching user's organizations", "user", user)
@@ -136,7 +135,7 @@ func (app *App) initSprinklerOrgs(ctx context.Context) error {
 	// Update sprinkler with all orgs at once
 	if len(allOrgs) > 0 {
 		app.sprinklerMonitor.updateOrgs(allOrgs)
-		if err := app.sprinklerMonitor.start(); err != nil {
+		if err := app.sprinklerMonitor.start(ctx); err != nil {
 			return fmt.Errorf("start sprinkler: %w", err)
 		}
 	}
@@ -287,7 +286,13 @@ func (app *App) executeGitHubQuery(ctx context.Context, query string, opts *gith
 	return result, err
 }
 
-func (app *App) executeGitHubQueryInternal(ctx context.Context, query string, opts *github.SearchOptions, result **github.IssuesSearchResult, resp **github.Response) error {
+func (app *App) executeGitHubQueryInternal(
+	ctx context.Context,
+	query string,
+	opts *github.SearchOptions,
+	result **github.IssuesSearchResult,
+	resp **github.Response,
+) error {
 	return retry.Do(func() error {
 		// Create timeout context for GitHub API call
 		githubCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

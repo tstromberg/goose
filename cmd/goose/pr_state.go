@@ -1,4 +1,3 @@
-// Package main - pr_state.go provides simplified PR state management.
 package main
 
 import (

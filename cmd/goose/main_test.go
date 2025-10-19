@@ -347,7 +347,11 @@ func TestTrayTitleUpdates(t *testing.T) {
 
 			// Call setTrayTitle to get the actual title
 			app.setTrayTitle()
-			actualTitle := app.systrayInterface.(*MockSystray).title
+			mockSystray, ok := app.systrayInterface.(*MockSystray)
+			if !ok {
+				t.Fatal("Failed to cast systrayInterface to MockSystray")
+			}
+			actualTitle := mockSystray.title
 
 			// Adjust expected title based on platform
 			expectedTitle := tt.expectedTitle

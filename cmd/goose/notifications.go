@@ -1,4 +1,3 @@
-// Package main - notifications.go provides simplified notification handling.
 package main
 
 import (
@@ -75,18 +74,18 @@ func (app *App) processNotifications(ctx context.Context) {
 
 			// Send notification
 			if isIncoming {
-				app.sendPRNotification(ctx, pr, "PR Blocked on You 🪿", "honk", &playedHonk)
+				app.sendPRNotification(ctx, &pr, "PR Blocked on You 🪿", "honk", &playedHonk)
 			} else {
 				// Add delay between different sound types in goroutine to avoid blocking
 				if playedHonk && !playedRocket {
 					time.Sleep(2 * time.Second)
 				}
-				app.sendPRNotification(ctx, pr, "Your PR is Blocked 🚀", "rocket", &playedRocket)
+				app.sendPRNotification(ctx, &pr, "Your PR is Blocked 🚀", "rocket", &playedRocket)
 			}
 
 			// Auto-open if enabled
 			if app.enableAutoBrowser && time.Since(app.startTime) > startupGracePeriod {
-				app.tryAutoOpenPR(ctx, pr, app.enableAutoBrowser, app.startTime)
+				app.tryAutoOpenPR(ctx, &pr, app.enableAutoBrowser, app.startTime)
 			}
 		}
 	}()
@@ -101,7 +100,7 @@ func (app *App) processNotifications(ctx context.Context) {
 }
 
 // sendPRNotification sends a notification for a single PR.
-func (app *App) sendPRNotification(ctx context.Context, pr PR, title string, soundType string, playedSound *bool) {
+func (app *App) sendPRNotification(ctx context.Context, pr *PR, title string, soundType string, playedSound *bool) {
 	message := fmt.Sprintf("%s #%d: %s", pr.Repository, pr.Number, pr.Title)
 
 	// Send desktop notification in a goroutine to avoid blocking

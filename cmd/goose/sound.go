@@ -1,4 +1,3 @@
-// Package main - sound.go handles platform-specific sound playback.
 package main
 
 import (

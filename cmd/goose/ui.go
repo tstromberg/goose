@@ -1,4 +1,3 @@
-// Package main - ui.go handles system tray UI and menu management.
 package main
 
 import (
@@ -10,6 +9,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,12 +65,8 @@ func openURL(ctx context.Context, rawURL string) error {
 		// Use rundll32 to open URL safely without cmd shell
 		slog.Debug("Executing command", "command", "rundll32.exe url.dll,FileProtocolHandler", "url", rawURL)
 		cmd = exec.CommandContext(ctx, "rundll32.exe", "url.dll,FileProtocolHandler", rawURL)
-	case "linux":
-		// Use xdg-open with full path
-		slog.Debug("Executing command", "command", "/usr/bin/xdg-open", "url", rawURL)
-		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
 	default:
-		// Try xdg-open for other Unix-like systems
+		// Use xdg-open with full path for Linux and other Unix-like systems
 		slog.Debug("Executing command", "command", "/usr/bin/xdg-open", "url", rawURL)
 		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
 	}
@@ -221,10 +217,10 @@ func (app *App) setTrayTitle() {
 			title = fmt.Sprintf("%d / %d", counts.IncomingBlocked, counts.OutgoingBlocked)
 			iconType = IconBoth
 		case counts.IncomingBlocked > 0:
-			title = fmt.Sprintf("%d", counts.IncomingBlocked)
+			title = strconv.Itoa(counts.IncomingBlocked)
 			iconType = IconGoose
 		default:
-			title = fmt.Sprintf("%d", counts.OutgoingBlocked)
+			title = strconv.Itoa(counts.OutgoingBlocked)
 			if allOutgoingAreFixTests {
 				iconType = IconCockroach
 			} else {
@@ -346,8 +342,11 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 			// Get the blocked time from state manager
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
-			// Show emoji for PRs blocked within the last 5 minutes (but only for real state transitions, not initial discoveries)
-			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration && !prState.IsInitialDiscovery {
+			// Show emoji for PRs blocked within the last 5 minutes
+			// (but only for real state transitions, not initial discoveries)
+			if hasState && !prState.FirstBlockedAt.IsZero() &&
+				time.Since(prState.FirstBlockedAt) < blockedPRIconDuration &&
+				!prState.IsInitialDiscovery {
 				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				// Use party popper for outgoing PRs, goose for incoming PRs
 				if sectionTitle == "Outgoing" {
@@ -533,7 +532,9 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
-			if hasState && !prState.FirstBlockedAt.IsZero() && time.Since(prState.FirstBlockedAt) < blockedPRIconDuration && !prState.IsInitialDiscovery {
+			if hasState && !prState.FirstBlockedAt.IsZero() &&
+				time.Since(prState.FirstBlockedAt) < blockedPRIconDuration &&
+				!prState.IsInitialDiscovery {
 				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				if sectionTitle == "Outgoing" {
 					title = fmt.Sprintf("🎉 %s", title)

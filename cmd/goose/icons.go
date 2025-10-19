@@ -24,21 +24,17 @@ const (
 // getIcon returns the icon bytes for the given type.
 func getIcon(iconType IconType) []byte {
 	switch iconType {
-	case IconGoose:
+	case IconGoose, IconBoth:
+		// For both, we'll use the goose icon as primary
 		return iconGoose
 	case IconPopper:
 		return iconPopper
 	case IconCockroach:
 		return iconCockroach
-	case IconSmiling:
-		return iconSmiling
 	case IconWarning:
 		return iconWarning
 	case IconLock:
 		return iconLock
-	case IconBoth:
-		// For both, we'll use the goose icon as primary
-		return iconGoose
 	default:
 		return iconSmiling
 	}
@@ -47,7 +43,7 @@ func getIcon(iconType IconType) []byte {
 // setTrayIcon updates the system tray icon based on PR counts.
 func (app *App) setTrayIcon(iconType IconType) {
 	iconBytes := getIcon(iconType)
-	if iconBytes == nil || len(iconBytes) == 0 {
+	if len(iconBytes) == 0 {
 		slog.Warn("Icon bytes are empty, skipping icon update", "type", iconType)
 		return
 	}

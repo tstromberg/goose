@@ -1,4 +1,3 @@
-// Package main - reliability.go provides reliability improvements and error recovery.
 package main
 
 import (
@@ -42,13 +41,13 @@ func safeExecute(operation string, fn func() error) (err error) {
 
 // circuitBreaker provides circuit breaker pattern for external API calls.
 type circuitBreaker struct {
-	mu              sync.RWMutex
 	lastFailureTime time.Time
-	timeout         time.Duration
 	name            string
-	state           string // "closed", "open", "half-open"
+	state           string
+	timeout         time.Duration
 	failures        int
 	threshold       int
+	mu              sync.RWMutex
 }
 
 func newCircuitBreaker(name string, threshold int, timeout time.Duration) *circuitBreaker {
@@ -66,13 +65,12 @@ func (cb *circuitBreaker) call(fn func() error) error {
 
 	// Check if circuit is open
 	if cb.state == "open" {
-		if time.Since(cb.lastFailureTime) > cb.timeout {
-			cb.state = "half-open"
-			slog.Info("[CIRCUIT] Circuit breaker transitioning to half-open",
-				"name", cb.name)
-		} else {
+		if time.Since(cb.lastFailureTime) <= cb.timeout {
 			return fmt.Errorf("circuit breaker open for %s", cb.name)
 		}
+		cb.state = "half-open"
+		slog.Info("[CIRCUIT] Circuit breaker transitioning to half-open",
+			"name", cb.name)
 	}
 
 	// Execute the function
@@ -107,14 +105,14 @@ func (cb *circuitBreaker) call(fn func() error) error {
 
 // healthMonitor tracks application health metrics.
 type healthMonitor struct {
-	mu            sync.RWMutex
 	lastCheckTime time.Time
 	uptime        time.Time
+	app           *App
 	apiCalls      int64
 	apiErrors     int64
 	cacheHits     int64
 	cacheMisses   int64
-	app           *App // Reference to app for accessing sprinkler status
+	mu            sync.RWMutex
 }
 
 func newHealthMonitor() *healthMonitor {
@@ -146,7 +144,7 @@ func (hm *healthMonitor) recordCacheAccess(hit bool) {
 	}
 }
 
-func (hm *healthMonitor) getMetrics() map[string]interface{} {
+func (hm *healthMonitor) getMetrics() map[string]any {
 	hm.mu.RLock()
 	defer hm.mu.RUnlock()
 
@@ -161,7 +159,7 @@ func (hm *healthMonitor) getMetrics() map[string]interface{} {
 		cacheHitRate = float64(hm.cacheHits) / float64(totalCacheAccess) * 100
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"uptime":         time.Since(hm.uptime),
 		"api_calls":      hm.apiCalls,
 		"api_errors":     hm.apiErrors,
