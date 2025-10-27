@@ -24,13 +24,19 @@ const (
 	sprinklerMaxDelay   = 10 * time.Second // Max delay between retries
 )
 
+// prEvent captures the essential details from a sprinkler event.
+type prEvent struct {
+	timestamp time.Time
+	url       string
+}
+
 // sprinklerMonitor manages WebSocket event subscriptions for all user orgs.
 type sprinklerMonitor struct {
 	lastConnectedAt time.Time
 	app             *App
 	client          *client.Client
 	cancel          context.CancelFunc
-	eventChan       chan string
+	eventChan       chan prEvent
 	lastEventMap    map[string]time.Time
 	token           string
 	orgs            []string
@@ -45,7 +51,7 @@ func newSprinklerMonitor(app *App, token string) *sprinklerMonitor {
 		app:          app,
 		token:        token,
 		orgs:         make([]string, 0),
-		eventChan:    make(chan string, eventChannelSize),
+		eventChan:    make(chan prEvent, eventChannelSize),
 		lastEventMap: make(map[string]time.Time),
 	}
 }
@@ -243,12 +249,15 @@ func (sm *sprinklerMonitor) handleEvent(event client.Event) {
 
 	slog.Info("[SPRINKLER] PR event received",
 		"url", event.URL,
-		"org", org)
+		"org", org,
+		"timestamp", event.Timestamp.Format(time.RFC3339))
 
 	// Send to event channel for processing (non-blocking)
 	select {
-	case sm.eventChan <- event.URL:
-		slog.Debug("[SPRINKLER] Event queued for processing", "url", event.URL)
+	case sm.eventChan <- prEvent{timestamp: event.Timestamp, url: event.URL}:
+		slog.Debug("[SPRINKLER] Event queued for processing",
+			"url", event.URL,
+			"timestamp", event.Timestamp.Format(time.RFC3339))
 	default:
 		slog.Warn("[SPRINKLER] Event channel full, dropping event",
 			"url", event.URL,
@@ -268,34 +277,34 @@ func (sm *sprinklerMonitor) processEvents(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case prURL := <-sm.eventChan:
-			sm.checkAndNotify(ctx, prURL)
+		case evt := <-sm.eventChan:
+			sm.checkAndNotify(ctx, evt)
 		}
 	}
 }
 
 // checkAndNotify checks if a PR is blocking and sends notification if needed.
-func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, url string) {
+func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, evt prEvent) {
 	start := time.Now()
 
 	user := sm.currentUser()
 	if user == "" {
-		slog.Debug("[SPRINKLER] Skipping check - no user configured", "url", url)
+		slog.Debug("[SPRINKLER] Skipping check - no user configured", "url", evt.url)
 		return
 	}
 
-	repo, n := parseRepoAndNumberFromURL(url)
+	repo, n := parseRepoAndNumberFromURL(evt.url)
 	if repo == "" || n == 0 {
-		slog.Warn("[SPRINKLER] Failed to parse PR URL", "url", url)
+		slog.Warn("[SPRINKLER] Failed to parse PR URL", "url", evt.url)
 		return
 	}
 
-	data, cached := sm.fetchTurnData(ctx, url, repo, n, start)
+	data, cached := sm.fetchTurnData(ctx, evt, repo, n, start)
 	if data == nil {
 		return
 	}
 
-	if sm.handleClosedPR(ctx, data, url, repo, n, cached) {
+	if sm.handleClosedPR(ctx, data, evt.url, repo, n, cached) {
 		return
 	}
 
@@ -304,11 +313,11 @@ func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, url string) {
 		return
 	}
 
-	if sm.handleNewPR(ctx, url, repo, n, act) {
+	if sm.handleNewPR(ctx, evt.url, repo, n, act) {
 		return
 	}
 
-	if sm.isAlreadyTrackedAsBlocked(url, repo, n) {
+	if sm.isAlreadyTrackedAsBlocked(evt.url, repo, n) {
 		return
 	}
 
@@ -317,9 +326,10 @@ func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, url string) {
 		"number", n,
 		"action", act.Kind,
 		"reason", act.Reason,
+		"event_timestamp", evt.timestamp.Format(time.RFC3339),
 		"elapsed", time.Since(start).Round(time.Millisecond))
 
-	sm.sendNotifications(ctx, url, repo, n, act)
+	sm.sendNotifications(ctx, evt.url, repo, n, act)
 }
 
 // currentUser returns the configured user for the sprinkler monitor.
@@ -335,16 +345,20 @@ func (sm *sprinklerMonitor) currentUser() string {
 }
 
 // fetchTurnData retrieves PR data from Turn API with retry logic.
-func (sm *sprinklerMonitor) fetchTurnData(ctx context.Context, url, repo string, n int, start time.Time) (*turn.CheckResponse, bool) {
+func (sm *sprinklerMonitor) fetchTurnData(ctx context.Context, evt prEvent, repo string, n int, start time.Time) (*turn.CheckResponse, bool) {
 	var data *turn.CheckResponse
 	var cached bool
 
 	err := retry.Do(func() error {
 		var err error
-		data, cached, err = sm.app.turnData(ctx, url, time.Now())
+		// Use event timestamp to bypass caching - this ensures we get fresh data for real-time events
+		data, cached, err = sm.app.turnData(ctx, evt.url, evt.timestamp)
 		if err != nil {
 			slog.Debug("[SPRINKLER] Turn API call failed (will retry)",
-				"repo", repo, "number", n, "error", err)
+				"repo", repo,
+				"number", n,
+				"event_timestamp", evt.timestamp.Format(time.RFC3339),
+				"error", err)
 			return err
 		}
 		return nil
@@ -365,6 +379,7 @@ func (sm *sprinklerMonitor) fetchTurnData(ctx context.Context, url, repo string,
 		slog.Warn("[SPRINKLER] Failed to get turn data after retries",
 			"repo", repo,
 			"number", n,
+			"event_timestamp", evt.timestamp.Format(time.RFC3339),
 			"elapsed", time.Since(start).Round(time.Millisecond),
 			"error", err)
 		return nil, false
