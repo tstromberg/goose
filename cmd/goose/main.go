@@ -32,6 +32,7 @@ var (
 
 const (
 	cacheTTL                  = 10 * 24 * time.Hour // 10 days - rely mostly on PR UpdatedAt
+	runningTestsCacheTTL      = 2 * time.Minute     // Short TTL for PRs with incomplete tests to catch completions quickly
 	cacheCleanupInterval      = 15 * 24 * time.Hour // 15 days - cleanup older than cache TTL
 	stalePRThreshold          = 90 * 24 * time.Hour
 	runningTestsCacheBypass   = 90 * time.Minute // Don't cache PRs with running tests if fresher than this
@@ -249,11 +250,11 @@ func main() {
 	if app.client != nil {
 		var user *github.User
 		err := retry.Do(func() error {
-			var retryErr error
-			user, _, retryErr = app.client.Users.Get(ctx, "")
-			if retryErr != nil {
-				slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
-				return retryErr
+			var err error
+			user, _, err = app.client.Users.Get(ctx, "")
+			if err != nil {
+				slog.Warn("GitHub Users.Get failed (will retry)", "error", err)
+				return err
 			}
 			return nil
 		},
@@ -327,11 +328,11 @@ func (app *App) handleReauthentication(ctx context.Context) {
 	if app.client != nil {
 		var user *github.User
 		err := retry.Do(func() error {
-			var retryErr error
-			user, _, retryErr = app.client.Users.Get(ctx, "")
-			if retryErr != nil {
-				slog.Warn("GitHub Users.Get failed (will retry)", "error", retryErr)
-				return retryErr
+			var err error
+			user, _, err = app.client.Users.Get(ctx, "")
+			if err != nil {
+				slog.Warn("GitHub Users.Get failed (will retry)", "error", err)
+				return err
 			}
 			return nil
 		},
@@ -536,9 +537,9 @@ func (app *App) updatePRs(ctx context.Context) {
 
 	var incoming, outgoing []PR
 	err := safeExecute("fetchPRs", func() error {
-		var fetchErr error
-		incoming, outgoing, fetchErr = app.fetchPRsInternal(ctx)
-		return fetchErr
+		var err error
+		incoming, outgoing, err = app.fetchPRsInternal(ctx)
+		return err
 	})
 	if err != nil {
 		slog.Error("Error fetching PRs", "error", err)

@@ -25,26 +25,34 @@ type cacheEntry struct {
 // checkCache checks the cache for a PR and returns the cached data if valid.
 // Returns (cachedData, cacheHit, hasRunningTests).
 func (app *App) checkCache(cacheFile, url string, updatedAt time.Time) (cachedData *turn.CheckResponse, cacheHit bool, hasRunningTests bool) {
-	fileData, readErr := os.ReadFile(cacheFile)
-	if readErr != nil {
-		if !os.IsNotExist(readErr) {
-			slog.Debug("[CACHE] Cache file read error", "url", url, "error", readErr)
+	fileData, err := os.ReadFile(cacheFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Debug("[CACHE] Cache file read error", "url", url, "error", err)
 		}
 		return nil, false, false
 	}
 
 	var entry cacheEntry
-	if unmarshalErr := json.Unmarshal(fileData, &entry); unmarshalErr != nil {
-		slog.Warn("Failed to unmarshal cache data", "url", url, "error", unmarshalErr)
+	if err := json.Unmarshal(fileData, &entry); err != nil {
+		slog.Warn("Failed to unmarshal cache data", "url", url, "error", err)
 		// Remove corrupted cache file
-		if removeErr := os.Remove(cacheFile); removeErr != nil {
-			slog.Error("Failed to remove corrupted cache file", "error", removeErr)
+		if err := os.Remove(cacheFile); err != nil {
+			slog.Error("Failed to remove corrupted cache file", "error", err)
 		}
 		return nil, false, false
 	}
 
+	// Determine TTL based on test state - use shorter TTL for incomplete tests
+	testState := entry.Data.PullRequest.TestState
+	isTestIncomplete := testState == "running" || testState == "queued" || testState == "pending"
+	ttl := cacheTTL
+	if isTestIncomplete {
+		ttl = runningTestsCacheTTL
+	}
+
 	// Check if cache is expired or PR updated
-	if time.Since(entry.CachedAt) >= cacheTTL || !entry.UpdatedAt.Equal(updatedAt) {
+	if time.Since(entry.CachedAt) >= ttl || !entry.UpdatedAt.Equal(updatedAt) {
 		// Log why cache was invalid
 		if !entry.UpdatedAt.Equal(updatedAt) {
 			slog.Debug("[CACHE] Cache miss - PR updated",
@@ -56,15 +64,14 @@ func (app *App) checkCache(cacheFile, url string, updatedAt time.Time) (cachedDa
 				"url", url,
 				"cached_at", entry.CachedAt.Format(time.RFC3339),
 				"cache_age", time.Since(entry.CachedAt).Round(time.Second),
-				"ttl", cacheTTL)
+				"ttl", ttl,
+				"test_state", testState)
 		}
-		return nil, false, false
+		return nil, false, isTestIncomplete
 	}
 
-	// Check for incomplete tests that should invalidate cache
+	// Check for incomplete tests that should invalidate cache and trigger Turn API cache bypass
 	cacheAge := time.Since(entry.CachedAt)
-	testState := entry.Data.PullRequest.TestState
-	isTestIncomplete := testState == "running" || testState == "queued" || testState == "pending"
 	if entry.Data != nil && isTestIncomplete && cacheAge < runningTestsCacheBypass {
 		slog.Debug("[CACHE] Cache invalidated - tests incomplete and cache entry is fresh",
 			"url", url,
@@ -144,15 +151,15 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 				"timestamp_sent", timestampToSend.Format(time.RFC3339))
 		}
 
-		var retryErr error
+		var err error
 		slog.Debug("[TURN] Making API call",
 			"url", url,
 			"user", app.currentUser.GetLogin(),
 			"pr_updated_at", timestampToSend.Format(time.RFC3339))
-		data, retryErr = app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), timestampToSend)
-		if retryErr != nil {
-			slog.Warn("Turn API error (will retry)", "error", retryErr)
-			return retryErr
+		data, err = app.turnClient.Check(turnCtx, url, app.currentUser.GetLogin(), timestampToSend)
+		if err != nil {
+			slog.Warn("Turn API error (will retry)", "error", err)
+			return err
 		}
 		slog.Debug("[TURN] API call successful", "url", url)
 		return nil
@@ -188,45 +195,36 @@ func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (
 	}
 
 	// Save to cache (don't fail if caching fails) - skip if --no-cache is set
-	// Don't cache when tests are incomplete - always re-poll to catch completion
-	if !app.noCache {
-		shouldCache := true
-
-		// Never cache PRs with incomplete tests - we want fresh data on every poll
-		testState := ""
-		if data != nil {
-			testState = data.PullRequest.TestState
-		}
+	// Cache PRs with incomplete tests using short TTL to catch completion quickly
+	if !app.noCache && data != nil {
+		testState := data.PullRequest.TestState
 		isTestIncomplete := testState == "running" || testState == "queued" || testState == "pending"
-		if data != nil && isTestIncomplete {
-			shouldCache = false
-			slog.Debug("[CACHE] Skipping cache for PR with incomplete tests",
-				"url", url,
-				"test_state", testState,
-				"pending_checks", len(data.PullRequest.CheckSummary.Pending))
-		}
 
-		if shouldCache {
-			entry := cacheEntry{
-				Data:      data,
-				CachedAt:  time.Now(),
-				UpdatedAt: updatedAt,
-			}
-			if cacheData, marshalErr := json.Marshal(entry); marshalErr != nil {
-				slog.Error("Failed to marshal cache data", "url", url, "error", marshalErr)
+		entry := cacheEntry{
+			Data:      data,
+			CachedAt:  time.Now(),
+			UpdatedAt: updatedAt,
+		}
+		if cacheData, err := json.Marshal(entry); err != nil {
+			slog.Error("Failed to marshal cache data", "url", url, "error", err)
+		} else {
+			// Ensure cache directory exists with secure permissions
+			if err := os.MkdirAll(filepath.Dir(cacheFile), 0o700); err != nil {
+				slog.Error("Failed to create cache directory", "error", err)
+			} else if err := os.WriteFile(cacheFile, cacheData, 0o600); err != nil {
+				slog.Error("Failed to write cache file", "error", err)
 			} else {
-				// Ensure cache directory exists with secure permissions
-				if dirErr := os.MkdirAll(filepath.Dir(cacheFile), 0o700); dirErr != nil {
-					slog.Error("Failed to create cache directory", "error", dirErr)
-				} else if writeErr := os.WriteFile(cacheFile, cacheData, 0o600); writeErr != nil {
-					slog.Error("Failed to write cache file", "error", writeErr)
-				} else {
-					slog.Debug("[CACHE] Saved to cache",
-						"url", url,
-						"cached_at", entry.CachedAt.Format(time.RFC3339),
-						"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339),
-						"cache_file", filepath.Base(cacheFile))
+				ttl := cacheTTL
+				if isTestIncomplete {
+					ttl = runningTestsCacheTTL
 				}
+				slog.Debug("[CACHE] Saved to cache",
+					"url", url,
+					"cached_at", entry.CachedAt.Format(time.RFC3339),
+					"pr_updated_at", entry.UpdatedAt.Format(time.RFC3339),
+					"ttl", ttl,
+					"test_state", testState,
+					"cache_file", filepath.Base(cacheFile))
 			}
 		}
 	}
@@ -258,8 +256,8 @@ func (app *App) cleanupOldCache() {
 		// Remove cache files older than cleanup interval (15 days)
 		if time.Since(info.ModTime()) > cacheCleanupInterval {
 			filePath := filepath.Join(app.cacheDir, entry.Name())
-			if removeErr := os.Remove(filePath); removeErr != nil {
-				slog.Error("Failed to remove old cache file", "file", filePath, "error", removeErr)
+			if err := os.Remove(filePath); err != nil {
+				slog.Error("Failed to remove old cache file", "file", filePath, "error", err)
 				errorCount++
 			} else {
 				cleanupCount++
