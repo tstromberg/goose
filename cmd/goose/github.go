@@ -482,6 +482,7 @@ func (app *App) fetchPRsInternal(ctx context.Context) (incoming []PR, outgoing [
 			Repository: repo,
 			Author:     issue.GetUser().GetLogin(),
 			Number:     issue.GetNumber(),
+			CreatedAt:  issue.GetCreatedAt().Time,
 			UpdatedAt:  issue.GetUpdatedAt().Time,
 			IsDraft:    issue.GetDraft(),
 		}
@@ -577,6 +578,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			actionReason := ""
 			actionKind := ""
 			testState := result.turnData.PullRequest.TestState
+			workflowState := result.turnData.Analysis.WorkflowState
 			if action, exists := result.turnData.Analysis.NextAction[user]; exists {
 				needsReview = true
 				isBlocked = action.Critical // Only critical actions are blocking
@@ -599,6 +601,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 					(*outgoing)[i].ActionReason = actionReason
 					(*outgoing)[i].ActionKind = actionKind
 					(*outgoing)[i].TestState = testState
+					(*outgoing)[i].WorkflowState = workflowState
 					break
 				}
 			} else {
@@ -610,6 +613,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 					(*incoming)[i].ActionReason = actionReason
 					(*incoming)[i].ActionKind = actionKind
 					(*incoming)[i].TestState = testState
+					(*incoming)[i].WorkflowState = workflowState
 					break
 				}
 			}
