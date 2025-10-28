@@ -342,6 +342,11 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 			title = fmt.Sprintf("%s — tests running...", title)
 		}
 
+		// Add "- NEW!" suffix if workflow state is NEWLY_PUBLISHED
+		if sortedPRs[prIndex].WorkflowState == "NEWLY_PUBLISHED" {
+			title = fmt.Sprintf("%s - NEW!", title)
+		}
+
 		// Add bullet point or emoji based on PR status
 		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
 			// Get the blocked time from state manager
@@ -531,6 +536,11 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 		} else if sortedPRs[prIndex].TestState == "running" {
 			// Show "tests running" as a fallback when no specific action is available
 			title = fmt.Sprintf("%s — tests running...", title)
+		}
+
+		// Add "- NEW!" suffix if workflow state is NEWLY_PUBLISHED
+		if sortedPRs[prIndex].WorkflowState == "NEWLY_PUBLISHED" {
+			title = fmt.Sprintf("%s - NEW!", title)
 		}
 
 		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
