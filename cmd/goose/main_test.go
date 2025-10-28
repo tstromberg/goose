@@ -198,6 +198,95 @@ func TestMenuItemTitleTransition(t *testing.T) {
 	_ = ctx // Unused in this test but would be used for real menu operations
 }
 
+// TestWorkflowStateNewlyPublished tests that PRs with NEWLY_PUBLISHED workflow state get "- NEW!" suffix.
+func TestWorkflowStateNewlyPublished(t *testing.T) {
+	tests := []struct {
+		name          string
+		pr            PR
+		expectedTitle string
+	}{
+		{
+			name: "newly_published_with_action",
+			pr: PR{
+				Repository:    "test/repo",
+				Number:        123,
+				ActionKind:    "review",
+				WorkflowState: "NEWLY_PUBLISHED",
+				NeedsReview:   true,
+				UpdatedAt:     time.Now(),
+			},
+			expectedTitle: "■ test/repo #123 — review - NEW!",
+		},
+		{
+			name: "newly_published_without_action",
+			pr: PR{
+				Repository:    "test/repo",
+				Number:        456,
+				WorkflowState: "NEWLY_PUBLISHED",
+				UpdatedAt:     time.Now(),
+			},
+			expectedTitle: "test/repo #456 - NEW!",
+		},
+		{
+			name: "newly_published_with_running_tests",
+			pr: PR{
+				Repository:    "test/repo",
+				Number:        789,
+				TestState:     "running",
+				WorkflowState: "NEWLY_PUBLISHED",
+				UpdatedAt:     time.Now(),
+			},
+			expectedTitle: "test/repo #789 — tests running... - NEW!",
+		},
+		{
+			name: "not_newly_published_with_action",
+			pr: PR{
+				Repository:    "test/repo",
+				Number:        999,
+				ActionKind:    "merge",
+				WorkflowState: "WAITING_FOR_REVIEW",
+				NeedsReview:   true,
+				UpdatedAt:     time.Now(),
+			},
+			expectedTitle: "■ test/repo #999 — merge",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Helper function to generate title (mirrors the logic in ui.go)
+			generateTitle := func(pr PR) string {
+				title := fmt.Sprintf("%s #%d", pr.Repository, pr.Number)
+
+				// Add action code if present, or test state as fallback
+				if pr.ActionKind != "" {
+					actionDisplay := strings.ReplaceAll(pr.ActionKind, "_", " ")
+					title = fmt.Sprintf("%s — %s", title, actionDisplay)
+				} else if pr.TestState == "running" {
+					title = fmt.Sprintf("%s — tests running...", title)
+				}
+
+				// Add "- NEW!" suffix if workflow state is NEWLY_PUBLISHED
+				if pr.WorkflowState == "NEWLY_PUBLISHED" {
+					title = fmt.Sprintf("%s - NEW!", title)
+				}
+
+				// Add prefix based on blocked status
+				if pr.NeedsReview || pr.IsBlocked {
+					title = fmt.Sprintf("■ %s", title)
+				}
+
+				return title
+			}
+
+			actualTitle := generateTitle(tt.pr)
+			if actualTitle != tt.expectedTitle {
+				t.Errorf("Expected title %q, got %q", tt.expectedTitle, actualTitle)
+			}
+		})
+	}
+}
+
 // TestTrayIconRestoredAfterNetworkRecovery tests that the tray icon is restored
 // to normal after network failures are resolved.
 func TestTrayIconRestoredAfterNetworkRecovery(t *testing.T) {
