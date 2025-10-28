@@ -54,6 +54,7 @@ const (
 // PR represents a pull request with metadata.
 type PR struct {
 	UpdatedAt         time.Time
+	CreatedAt         time.Time
 	TurnDataAppliedAt time.Time
 	FirstBlockedAt    time.Time // When this PR was first detected as blocked
 	Title             string
@@ -63,6 +64,7 @@ type PR struct {
 	ActionReason      string
 	ActionKind        string // The kind of action expected (review, merge, fix_tests, etc.)
 	TestState         string // Test state from Turn API: "running", "passing", "failing", etc.
+	WorkflowState     string // Workflow state from Turn API: "running_tests", "waiting_for_review", etc.
 	Number            int
 	IsDraft           bool
 	IsBlocked         bool
@@ -863,21 +865,42 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr *PR, autoBrowserEnabled bo
 		return
 	}
 
+	// Only auto-open if the PR is actually blocked or needs review
+	// This ensures we have a valid NextAction before opening
+	if !pr.IsBlocked && !pr.NeedsReview {
+		slog.Debug("[BROWSER] Skipping auto-open for non-blocked PR",
+			"repo", pr.Repository, "number", pr.Number,
+			"is_blocked", pr.IsBlocked, "needs_review", pr.NeedsReview)
+		return
+	}
+
 	if app.browserRateLimiter.CanOpen(startTime, pr.URL) {
 		slog.Info("[BROWSER] Auto-opening newly blocked PR",
-			"repo", pr.Repository, "number", pr.Number, "url", pr.URL)
+			"repo", pr.Repository,
+			"number", pr.Number,
+			"url", pr.URL,
+			"workflow_state", pr.WorkflowState,
+			"test_state", pr.TestState,
+			"is_draft", pr.IsDraft,
+			"age_since_creation", time.Since(pr.CreatedAt).Round(time.Second),
+			"age_since_update", time.Since(pr.UpdatedAt).Round(time.Second))
 		// Use strict validation for auto-opened URLs
 		// Validate against strict GitHub PR URL pattern for auto-opening
 		if err := validateGitHubPRURL(pr.URL); err != nil {
 			slog.Warn("Auto-open strict validation failed", "url", sanitizeForLog(pr.URL), "error", err)
 			return
 		}
-		if err := openURL(ctx, pr.URL); err != nil {
+		// Use ActionKind as the goose parameter value, or "next_action" if not set
+		gooseParam := pr.ActionKind
+		if gooseParam == "" {
+			gooseParam = "next_action"
+		}
+		if err := openURL(ctx, pr.URL, gooseParam); err != nil {
 			slog.Error("[BROWSER] Failed to auto-open PR", "url", pr.URL, "error", err)
 		} else {
 			app.browserRateLimiter.RecordOpen(pr.URL)
 			slog.Info("[BROWSER] Successfully opened PR in browser",
-				"repo", pr.Repository, "number", pr.Number, "action", pr.ActionKind)
+				"repo", pr.Repository, "number", pr.Number, "action", pr.ActionKind, "goose_param", gooseParam)
 		}
 	}
 }

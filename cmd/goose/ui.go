@@ -20,7 +20,9 @@ import (
 var _ *systray.MenuItem = nil
 
 // openURL safely opens a URL in the default browser after validation.
-func openURL(ctx context.Context, rawURL string) error {
+// The gooseParam parameter specifies what value to use for the ?goose= query parameter.
+// If empty, defaults to "1" for menu clicks.
+func openURL(ctx context.Context, rawURL string, gooseParam string) error {
 	// Parse and validate the URL
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -45,10 +47,13 @@ func openURL(ctx context.Context, rawURL string) error {
 		return errors.New("URLs with user info are not allowed")
 	}
 
-	// Add goose=1 parameter to track source for GitHub and dash URLs
+	// Add goose parameter to track source for GitHub and dash URLs
 	if u.Host == "github.com" || u.Host == "www.github.com" || u.Host == "dash.ready-to-review.dev" {
 		q := u.Query()
-		q.Set("goose", "1")
+		if gooseParam == "" {
+			gooseParam = "1"
+		}
+		q.Set("goose", gooseParam)
 		u.RawQuery = q.Encode()
 		rawURL = u.String()
 	}
@@ -423,7 +428,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		// Capture URL to avoid loop variable capture bug
 		prURL := sortedPRs[prIndex].URL
 		item.Click(func() {
-			if err := openURL(ctx, prURL); err != nil {
+			if err := openURL(ctx, prURL, ""); err != nil {
 				slog.Error("failed to open url", "error", err)
 			}
 		})
@@ -619,7 +624,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 		// Add error details
 		errorMsg := app.systrayInterface.AddMenuItem(authError, "Click to see setup instructions")
 		errorMsg.Click(func() {
-			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login"); err != nil {
+			if err := openURL(ctx, "https://cli.github.com/manual/gh_auth_login", ""); err != nil {
 				slog.Error("failed to open setup instructions", "error", err)
 			}
 		})
@@ -729,7 +734,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Add Web Dashboard link
 	dashboardItem := app.systrayInterface.AddMenuItem("Web Dashboard", "")
 	dashboardItem.Click(func() {
-		if err := openURL(ctx, "https://dash.ready-to-review.dev/"); err != nil {
+		if err := openURL(ctx, "https://dash.ready-to-review.dev/", ""); err != nil {
 			slog.Error("failed to open dashboard", "error", err)
 		}
 	})
