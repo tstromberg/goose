@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray" // needed for MenuItem type
 )
 
@@ -342,13 +343,12 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 			title = fmt.Sprintf("%s — tests running...", title)
 		}
 
-		// Add "- NEW!" suffix if workflow state is NEWLY_PUBLISHED
-		if sortedPRs[prIndex].WorkflowState == "NEWLY_PUBLISHED" {
-			title = fmt.Sprintf("%s - NEW!", title)
-		}
-
 		// Add bullet point or emoji based on PR status
-		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
+		switch {
+		case sortedPRs[prIndex].WorkflowState == string(turn.StateNewlyPublished):
+			// Use gem emoji for newly published PRs
+			title = fmt.Sprintf("💎 %s", title)
+		case sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked:
 			// Get the blocked time from state manager
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
@@ -358,16 +358,27 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 				time.Since(prState.FirstBlockedAt) < blockedPRIconDuration &&
 				!prState.IsInitialDiscovery {
 				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
-				// Use party popper for outgoing PRs, goose for incoming PRs
+				// Use cockroach for fix_tests, party popper for other outgoing PRs, goose for incoming PRs
 				if sectionTitle == "Outgoing" {
-					title = fmt.Sprintf("🎉 %s", title)
-					slog.Info("[MENU] Adding party popper to outgoing PR",
-						"repo", sortedPRs[prIndex].Repository,
-						"number", sortedPRs[prIndex].Number,
-						"url", sortedPRs[prIndex].URL,
-						"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
-						"blocked_ago", timeSinceBlocked.Round(time.Second),
-						"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
+					if sortedPRs[prIndex].ActionKind == "fix_tests" {
+						title = fmt.Sprintf("🪳 %s", title)
+						slog.Info("[MENU] Adding cockroach to outgoing PR with broken tests",
+							"repo", sortedPRs[prIndex].Repository,
+							"number", sortedPRs[prIndex].Number,
+							"url", sortedPRs[prIndex].URL,
+							"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+							"blocked_ago", timeSinceBlocked.Round(time.Second),
+							"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
+					} else {
+						title = fmt.Sprintf("🎉 %s", title)
+						slog.Info("[MENU] Adding party popper to outgoing PR",
+							"repo", sortedPRs[prIndex].Repository,
+							"number", sortedPRs[prIndex].Number,
+							"url", sortedPRs[prIndex].URL,
+							"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+							"blocked_ago", timeSinceBlocked.Round(time.Second),
+							"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
+					}
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
 					slog.Debug("[MENU] Adding goose to incoming PR",
@@ -394,9 +405,11 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 					}
 				}
 			}
-		} else if sortedPRs[prIndex].ActionKind != "" {
+		case sortedPRs[prIndex].ActionKind != "":
 			// PR has an action but isn't blocked - add bullet to indicate it could use input
 			title = fmt.Sprintf("• %s", title)
+		default:
+			// No special prefix needed
 		}
 		// Format age inline for tooltip
 		duration := time.Since(sortedPRs[prIndex].UpdatedAt)
@@ -538,13 +551,12 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 			title = fmt.Sprintf("%s — tests running...", title)
 		}
 
-		// Add "- NEW!" suffix if workflow state is NEWLY_PUBLISHED
-		if sortedPRs[prIndex].WorkflowState == "NEWLY_PUBLISHED" {
-			title = fmt.Sprintf("%s - NEW!", title)
-		}
-
 		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
-		if sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked {
+		switch {
+		case sortedPRs[prIndex].WorkflowState == string(turn.StateNewlyPublished):
+			// Use gem emoji for newly published PRs
+			title = fmt.Sprintf("💎 %s", title)
+		case sortedPRs[prIndex].NeedsReview || sortedPRs[prIndex].IsBlocked:
 			prState, hasState := app.stateManager.PRState(sortedPRs[prIndex].URL)
 
 			if hasState && !prState.FirstBlockedAt.IsZero() &&
@@ -552,14 +564,25 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 				!prState.IsInitialDiscovery {
 				timeSinceBlocked := time.Since(prState.FirstBlockedAt)
 				if sectionTitle == "Outgoing" {
-					title = fmt.Sprintf("🎉 %s", title)
-					slog.Info("[MENU] Adding party popper to outgoing PR in generateMenuTitles",
-						"repo", sortedPRs[prIndex].Repository,
-						"number", sortedPRs[prIndex].Number,
-						"url", sortedPRs[prIndex].URL,
-						"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
-						"blocked_ago", timeSinceBlocked.Round(time.Second),
-						"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
+					if sortedPRs[prIndex].ActionKind == "fix_tests" {
+						title = fmt.Sprintf("🪳 %s", title)
+						slog.Info("[MENU] Adding cockroach to outgoing PR with broken tests in generateMenuTitles",
+							"repo", sortedPRs[prIndex].Repository,
+							"number", sortedPRs[prIndex].Number,
+							"url", sortedPRs[prIndex].URL,
+							"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+							"blocked_ago", timeSinceBlocked.Round(time.Second),
+							"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
+					} else {
+						title = fmt.Sprintf("🎉 %s", title)
+						slog.Info("[MENU] Adding party popper to outgoing PR in generateMenuTitles",
+							"repo", sortedPRs[prIndex].Repository,
+							"number", sortedPRs[prIndex].Number,
+							"url", sortedPRs[prIndex].URL,
+							"firstBlockedAt", prState.FirstBlockedAt.Format(time.RFC3339),
+							"blocked_ago", timeSinceBlocked.Round(time.Second),
+							"remaining", (blockedPRIconDuration - timeSinceBlocked).Round(time.Second))
+					}
 				} else {
 					title = fmt.Sprintf("🪿 %s", title)
 					slog.Debug("[MENU] Adding goose to incoming PR in generateMenuTitles",
@@ -586,9 +609,11 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 						"number", sortedPRs[prIndex].Number)
 				}
 			}
-		} else if sortedPRs[prIndex].ActionKind != "" {
+		case sortedPRs[prIndex].ActionKind != "":
 			// PR has an action but isn't blocked - add bullet to indicate it could use input
 			title = fmt.Sprintf("• %s", title)
+		default:
+			// No special prefix needed
 		}
 
 		titles = append(titles, title)
