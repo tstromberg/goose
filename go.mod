@@ -4,8 +4,8 @@ go 1.24.0
 
 require (
 	github.com/codeGROOVE-dev/retry v1.3.0
-	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251027213037-05bb80a9db89
-	github.com/codeGROOVE-dev/turnclient v0.0.0-20251028130307-1f85c9aa43c4
+	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251029020504-57f2ea3ae37a
+	github.com/codeGROOVE-dev/turnclient v0.0.0-20251030022425-bc3b14acf75e
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
 	github.com/google/go-github/v57 v57.0.0
@@ -14,7 +14,7 @@ require (
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
-	github.com/codeGROOVE-dev/prx v0.0.0-20251027204543-4e6165f046e5 // indirect
+	github.com/codeGROOVE-dev/prx v0.0.0-20251030022101-ff906928a1e4 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
