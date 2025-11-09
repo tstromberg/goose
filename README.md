@@ -21,14 +21,14 @@ Lives in your menubar like a tiny waterfowl of productivity shame, watching your
 - **Auto-start** on login (macOS)
 - **Auto-open** incoming PRs in your browser (off by default, rate-limited)
 - **Org Filtering** for orgs you may not care about in a home or work context
-* **Multi-platform** support for Linux, macOS, Windows, FreeBSD, whatever.
+- **Multi-platform** support for Linux, macOS, Windows, FreeBSD, whatever.
 
-You can also visit the web-based dashboard at https://dash.ready-to-review.dev/
+You can also visit the web-based dashboard at <https://dash.ready-to-review.dev/>
 
 ## Dependencies
 
-* [go](https://go.dev/) 1.23.4 or higher
-* [gh](https://cli.github.com/), AKA the GitHub command-line utility
+- [go](https://go.dev/) 1.23.4 or higher
+- [gh](https://cli.github.com/), AKA the GitHub command-line utility
 
 ## macOS Quick Start ⚡ (Get Honked At)
 
@@ -84,6 +84,10 @@ We don't yet persist fine-grained tokens to disk - PR's welcome!
 - PR metadata may be cached locally & remotely for up to 20 days
 - No data is resold to anyone. We don't even want it.
 - No telemetry is collected
+
+## License
+
+This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
