@@ -466,7 +466,7 @@ func (app *App) onReady(ctx context.Context) {
 	// Check if we have an auth error
 	if app.authError != "" {
 		systray.SetTitle("")
-		app.setTrayIcon(IconLock)
+		app.setTrayIcon(IconLock, PRCounts{})
 		systray.SetTooltip("Goose - Authentication Error")
 		// Create initial error menu
 		app.rebuildMenu(ctx)
@@ -476,7 +476,7 @@ func (app *App) onReady(ctx context.Context) {
 	}
 
 	systray.SetTitle("")
-	app.setTrayIcon(IconSmiling) // Start with smiling icon while loading
+	app.setTrayIcon(IconSmiling, PRCounts{}) // Start with smiling icon while loading
 
 	// Set tooltip based on whether we're using a custom user
 	tooltip := "Goose - Loading PRs..."
@@ -500,7 +500,7 @@ func (app *App) updateLoop(ctx context.Context) {
 
 			// Set error state in UI
 			systray.SetTitle("")
-			app.setTrayIcon(IconWarning)
+			app.setTrayIcon(IconWarning, PRCounts{})
 			systray.SetTooltip("Goose - Critical error")
 
 			// Update failure count
@@ -588,7 +588,7 @@ func (app *App) updatePRs(ctx context.Context) {
 		}
 
 		systray.SetTitle("")
-		app.setTrayIcon(iconType)
+		app.setTrayIcon(iconType, PRCounts{})
 
 		// Include time since last success and user info
 		timeSinceSuccess := "never"
@@ -769,7 +769,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		}
 
 		systray.SetTitle("")
-		app.setTrayIcon(iconType)
+		app.setTrayIcon(iconType, PRCounts{})
 		systray.SetTooltip(tooltip)
 
 		// Create or update menu to show error state

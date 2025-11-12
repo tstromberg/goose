@@ -262,7 +262,7 @@ func (app *App) setTrayTitle() {
 		"outgoing_total", counts.OutgoingTotal,
 		"outgoing_blocked", counts.OutgoingBlocked)
 	app.systrayInterface.SetTitle(title)
-	app.setTrayIcon(iconType)
+	app.setTrayIcon(iconType, counts)
 }
 
 // addPRSection adds a section of PRs to the menu.
