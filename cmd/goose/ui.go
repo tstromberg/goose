@@ -266,6 +266,8 @@ func (app *App) setTrayTitle() {
 }
 
 // addPRSection adds a section of PRs to the menu.
+//
+//nolint:maintidx // Function complexity is inherent to PR menu building logic
 func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string, blockedCount int) {
 	slog.Debug("[MENU] addPRSection called",
 		"section", sectionTitle,

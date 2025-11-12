@@ -68,10 +68,15 @@ env GITHUB_TOKEN=your_token_here goose
 
 We don't yet persist fine-grained tokens to disk - PR's welcome!
 
+## Usage
+
+- **macOS/Windows**: Click the tray icon to show the menu
+- **Linux/BSD with snixembed**: Right-click the tray icon to show the menu (left-click refreshes PRs)
+
 ## Known Issues
 
 - Visual notifications won't work on macOS until we release signed binaries.
-- Tray icons on GNOME require [snixembed](https://git.sr.ht/~steef/snixembed) and enabling the [Legacy Tray extension](https://www.omgubuntu.co.uk/2024/08/gnome-official-status-icons-extension).
+- Tray icons on GNOME require [snixembed](https://git.sr.ht/~steef/snixembed) and enabling the [Legacy Tray extension](https://www.omgubuntu.co.uk/2024/08/gnome-official-status-icons-extension). Goose will automatically launch snixembed if needed, but you must install it first (e.g., `apt install snixembed` or `yay -S snixembed`).
 
 ## Pricing
 

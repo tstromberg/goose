@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeGROOVE-dev/goose/cmd/goose/x11tray"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray"
@@ -110,6 +111,7 @@ type App struct {
 	enableAutoBrowser            bool
 }
 
+//nolint:maintidx // Main function complexity is acceptable for initialization logic
 func main() {
 	// Parse command line flags
 	var targetUser string
@@ -294,6 +296,15 @@ func main() {
 		slog.Info("Skipping user load - no GitHub client available")
 	}
 
+	slog.Info("Checking system tray availability...")
+	trayProxy, err := x11tray.EnsureTray(ctx)
+	if err != nil {
+		slog.Error("FATAL: System tray unavailable",
+			"error", err,
+			"help", "Ensure your desktop environment has a system tray, or install snixembed")
+		os.Exit(1)
+	}
+
 	slog.Info("Starting systray...")
 	// Create a cancellable context for the application
 	appCtx, cancel := context.WithCancel(ctx)
@@ -304,6 +315,13 @@ func main() {
 		cancel() // Cancel the context to stop goroutines
 		if app.sprinklerMonitor != nil {
 			app.sprinklerMonitor.stop()
+		}
+		// Stop tray proxy if we started one
+		if trayProxy != nil {
+			slog.Info("Stopping system tray proxy")
+			if err := trayProxy.Stop(); err != nil {
+				slog.Warn("Failed to stop tray proxy cleanly", "error", err)
+			}
 		}
 		app.cleanupOldCache()
 	})
@@ -423,7 +441,10 @@ func (app *App) onReady(ctx context.Context) {
 			}
 		}
 
+		// On Unix platforms with snixembed, menu display is controlled by physical
+		// right-clicks detected by snixembed. Left-click is used for refresh action.
 		if menu != nil {
+			// On macOS/Windows, show the menu
 			if err := menu.ShowMenu(); err != nil {
 				slog.Error("Failed to show menu", "error", err)
 			}
@@ -433,10 +454,13 @@ func (app *App) onReady(ctx context.Context) {
 	systray.SetOnRClick(func(menu systray.IMenu) {
 		slog.Debug("Right click detected")
 		if menu != nil {
+			// On macOS/Windows, explicitly show the menu
 			if err := menu.ShowMenu(); err != nil {
 				slog.Error("Failed to show menu", "error", err)
 			}
 		}
+		// On Unix platforms with snixembed, the menu is automatically shown
+		// by snixembed when it detects the right-click
 	})
 
 	// Check if we have an auth error
