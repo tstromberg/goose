@@ -71,6 +71,7 @@ We don't yet persist fine-grained tokens to disk - PR's welcome!
 ## Known Issues
 
 - Visual notifications won't work on macOS until we release signed binaries.
+- Tray icons on GNOME require [snixembed](https://git.sr.ht/~steef/snixembed) and enabling the [Legacy Tray extension](https://www.omgubuntu.co.uk/2024/08/gnome-official-status-icons-extension).
 
 ## Pricing
 
