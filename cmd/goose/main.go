@@ -372,9 +372,9 @@ func (app *App) handleReauthentication(ctx context.Context) {
 	}
 
 	// Update tooltip
-	tooltip := "Goose - Loading PRs..."
+	tooltip := "Review Goose"
 	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("Goose - Loading PRs... (@%s)", app.targetUser)
+		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
 	}
 	systray.SetTooltip(tooltip)
 
@@ -479,9 +479,9 @@ func (app *App) onReady(ctx context.Context) {
 	app.setTrayIcon(IconSmiling, PRCounts{}) // Start with smiling icon while loading
 
 	// Set tooltip based on whether we're using a custom user
-	tooltip := "Goose - Loading PRs..."
+	tooltip := "Review Goose"
 	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("Goose - Loading PRs... (@%s)", app.targetUser)
+		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
 	}
 	systray.SetTooltip(tooltip)
 
