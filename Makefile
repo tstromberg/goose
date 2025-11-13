@@ -170,7 +170,14 @@ install-darwin: app-bundle
 install-unix: build
 	@echo "Installing on $(shell uname)..."
 	@echo "Installing binary to /usr/local/bin..."
-	@sudo install -m 755 out/$(APP_NAME) /usr/local/bin/
+	@if command -v sudo >/dev/null 2>&1; then \
+		sudo install -m 755 out/$(APP_NAME) /usr/local/bin/; \
+	elif command -v doas >/dev/null 2>&1; then \
+		doas install -m 755 out/$(APP_NAME) /usr/local/bin/; \
+	else \
+		echo "Error: Neither sudo nor doas found. Please install the binary manually."; \
+		exit 1; \
+	fi
 	@echo "Installation complete! $(APP_NAME) has been installed to /usr/local/bin"
 
 # Install on Windows
