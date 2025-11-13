@@ -2,17 +2,15 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
-	"os/exec"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/codeGROOVE-dev/goose/pkg/safebrowse"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray" // needed for MenuItem type
 )
@@ -20,71 +18,19 @@ import (
 // Ensure systray package is used.
 var _ *systray.MenuItem = nil
 
-// openURL safely opens a URL in the default browser after validation.
+// openURL safely opens a URL in the default browser using safebrowse package.
 // The gooseParam parameter specifies what value to use for the ?goose= query parameter.
 // If empty, defaults to "1" for menu clicks.
 func openURL(ctx context.Context, rawURL string, gooseParam string) error {
-	// Parse and validate the URL
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("parse url: %w", err)
+	// Set default goose parameter
+	if gooseParam == "" {
+		gooseParam = "1"
 	}
 
-	// Security validation: scheme, host whitelist, no userinfo
-	if u.Scheme != "https" {
-		return fmt.Errorf("invalid url scheme: %s (only https allowed)", u.Scheme)
-	}
-
-	allowedHosts := map[string]bool{
-		"github.com":               true,
-		"www.github.com":           true,
-		"dash.ready-to-review.dev": true,
-	}
-	if !allowedHosts[u.Host] {
-		return fmt.Errorf("invalid host: %s", u.Host)
-	}
-
-	if u.User != nil {
-		return errors.New("URLs with user info are not allowed")
-	}
-
-	// Add goose parameter to track source for GitHub and dash URLs
-	if u.Host == "github.com" || u.Host == "www.github.com" || u.Host == "dash.ready-to-review.dev" {
-		q := u.Query()
-		if gooseParam == "" {
-			gooseParam = "1"
-		}
-		q.Set("goose", gooseParam)
-		u.RawQuery = q.Encode()
-		rawURL = u.String()
-	}
-
-	// Execute the open command based on OS
-	// Use safer methods that don't invoke shell interpretation
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		// Use open command with explicit arguments to prevent injection
-		slog.Debug("Executing command", "command", "/usr/bin/open", "url", rawURL)
-		cmd = exec.CommandContext(ctx, "/usr/bin/open", "-u", rawURL)
-	case "windows":
-		// Use rundll32 to open URL safely without cmd shell
-		slog.Debug("Executing command", "command", "rundll32.exe url.dll,FileProtocolHandler", "url", rawURL)
-		cmd = exec.CommandContext(ctx, "rundll32.exe", "url.dll,FileProtocolHandler", rawURL)
-	default:
-		// Use xdg-open with full path for Linux and other Unix-like systems
-		slog.Debug("Executing command", "command", "/usr/bin/xdg-open", "url", rawURL)
-		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("open url: %w", err)
-	}
-
-	// Don't wait for the command to finish - browser launch is fire-and-forget
-	// The OS will handle the browser process lifecycle
-
-	return nil
+	// Use safebrowse package to validate and open the URL with parameters
+	return safebrowse.OpenWithParams(ctx, rawURL, map[string]string{
+		"goose": gooseParam,
+	})
 }
 
 // PRCounts represents PR count information.

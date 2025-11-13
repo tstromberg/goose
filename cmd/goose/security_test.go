@@ -1,132 +1,271 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
-func TestValidateGitHubPRURL(t *testing.T) {
+// URL validation tests are in pkg/safebrowse/safebrowse_test.go
+// This file only contains tests for goose-specific security functions
+
+func TestValidateGitHubUsername(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		wantErr  bool
+	}{
+		// Valid usernames
+		{
+			name:     "simple username",
+			username: "user",
+			wantErr:  false,
+		},
+		{
+			name:     "username with hyphen",
+			username: "user-name",
+			wantErr:  false,
+		},
+		{
+			name:     "username with numbers",
+			username: "user123",
+			wantErr:  false,
+		},
+		{
+			name:     "single character",
+			username: "a",
+			wantErr:  false,
+		},
+		{
+			name:     "max length username",
+			username: strings.Repeat("a", 39),
+			wantErr:  false,
+		},
+
+		// Invalid usernames
+		{
+			name:     "empty string",
+			username: "",
+			wantErr:  true,
+		},
+		{
+			name:     "username starting with hyphen",
+			username: "-user",
+			wantErr:  true,
+		},
+		{
+			name:     "username ending with hyphen",
+			username: "user-",
+			wantErr:  true,
+		},
+		{
+			name:     "username with double hyphen",
+			username: "user--name",
+			wantErr:  false, // GitHub allows this
+		},
+		{
+			name:     "username too long",
+			username: strings.Repeat("a", 40),
+			wantErr:  true,
+		},
+		{
+			name:     "username with underscore",
+			username: "user_name",
+			wantErr:  true,
+		},
+		{
+			name:     "username with dot",
+			username: "user.name",
+			wantErr:  true,
+		},
+		{
+			name:     "username with space",
+			username: "user name",
+			wantErr:  true,
+		},
+		{
+			name:     "username with special chars",
+			username: "user@name",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateGitHubUsername(tt.username)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateGitHubUsername() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateGitHubToken(t *testing.T) {
 	tests := []struct {
 		name    string
-		url     string
+		token   string
 		wantErr bool
 	}{
-		// Valid URLs
+		// Valid tokens
 		{
-			name:    "valid PR URL",
-			url:     "https://github.com/owner/repo/pull/123",
+			name:    "classic token (40 hex chars)",
+			token:   "abcdef0123456789abcdef0123456789abcdef01",
 			wantErr: false,
 		},
 		{
-			name:    "valid PR URL with goose param",
-			url:     "https://github.com/owner/repo/pull/123?goose=1",
+			name:    "personal access token (ghp_)",
+			token:   "ghp_" + strings.Repeat("a", 36),
 			wantErr: false,
 		},
 		{
-			name:    "valid PR URL with goose=review param",
-			url:     "https://github.com/owner/repo/pull/123?goose=review",
+			name:    "server token (ghs_)",
+			token:   "ghs_" + strings.Repeat("A", 36),
 			wantErr: false,
 		},
 		{
-			name:    "valid PR URL with goose=merge param",
-			url:     "https://github.com/owner/repo/pull/123?goose=merge",
+			name:    "refresh token (ghr_)",
+			token:   "ghr_" + strings.Repeat("1", 36),
 			wantErr: false,
 		},
 		{
-			name:    "valid PR URL with goose=fix_tests param",
-			url:     "https://github.com/owner/repo/pull/123?goose=fix_tests",
+			name:    "OAuth token (gho_)",
+			token:   "gho_" + strings.Repeat("z", 36),
 			wantErr: false,
 		},
 		{
-			name:    "valid PR URL with goose=resolve_comments param",
-			url:     "https://github.com/owner/repo/pull/123?goose=resolve_comments",
+			name:    "user-to-server token (ghu_)",
+			token:   "ghu_" + strings.Repeat("Z", 36),
 			wantErr: false,
 		},
 		{
-			name:    "valid PR URL with hyphen in owner",
-			url:     "https://github.com/owner-name/repo/pull/1",
-			wantErr: false,
-		},
-		{
-			name:    "valid PR URL with dots in repo",
-			url:     "https://github.com/owner/repo.name/pull/999",
+			name:    "fine-grained PAT",
+			token:   "github_pat_" + strings.Repeat("a", 82),
 			wantErr: false,
 		},
 
-		// Invalid URLs - security issues
+		// Invalid tokens
 		{
-			name:    "URL with credential injection",
-			url:     "https://evil@github.com/owner/repo/pull/123",
+			name:    "empty string",
+			token:   "",
 			wantErr: true,
 		},
 		{
-			name:    "URL with encoded characters",
-			url:     "https://github.com/owner/repo/pull/123%2F../",
+			name:    "too short",
+			token:   "short",
 			wantErr: true,
 		},
 		{
-			name:    "URL with double slashes",
-			url:     "https://github.com//owner/repo/pull/123",
+			name:    "too long",
+			token:   strings.Repeat("a", 300),
 			wantErr: true,
 		},
 		{
-			name:    "URL with fragment",
-			url:     "https://github.com/owner/repo/pull/123#evil",
+			name:    "placeholder: your_token",
+			token:   "your_token_here_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			wantErr: true,
 		},
 		{
-			name:    "URL with extra query params",
-			url:     "https://github.com/owner/repo/pull/123?foo=bar",
+			name:    "placeholder: xxx",
+			token:   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
 			wantErr: true,
 		},
 		{
-			name:    "URL with extra path segments",
-			url:     "https://github.com/owner/repo/pull/123/files",
-			wantErr: true,
-		},
-
-		// Invalid URLs - wrong format
-		{
-			name:    "URL with multiple query parameters",
-			url:     "https://github.com/owner/repo/pull/123?goose=review&other=param",
+			name:    "placeholder with dots",
+			token:   "...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			wantErr: true,
 		},
 		{
-			name:    "not a PR URL",
-			url:     "https://github.com/owner/repo",
+			name:    "invalid format",
+			token:   "invalid_format_token_here_aaaaaaaaaaaaaaaa",
 			wantErr: true,
 		},
 		{
-			name:    "issue URL instead of PR",
-			url:     "https://github.com/owner/repo/issues/123",
+			name:    "classic token too short",
+			token:   "abcdef0123456789abcdef0123456789abcdef0",
 			wantErr: true,
 		},
 		{
-			name:    "HTTP instead of HTTPS",
-			url:     "http://github.com/owner/repo/pull/123",
+			name:    "ghp_ token too short",
+			token:   "ghp_" + strings.Repeat("a", 35),
 			wantErr: true,
 		},
 		{
-			name:    "wrong domain",
-			url:     "https://gitlab.com/owner/repo/pull/123",
-			wantErr: true,
-		},
-		{
-			name:    "PR number with leading zero",
-			url:     "https://github.com/owner/repo/pull/0123",
-			wantErr: true,
-		},
-		{
-			name:    "PR number zero",
-			url:     "https://github.com/owner/repo/pull/0",
+			name:    "fine-grained PAT too short",
+			token:   "github_pat_" + strings.Repeat("a", 81),
 			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateGitHubPRURL(tt.url)
+			err := validateGitHubToken(tt.token)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validateGitHubPRURL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("validateGitHubToken() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSanitizeForLog(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantHide bool // true if sensitive data should be redacted
+	}{
+		{
+			name:     "classic token redacted",
+			input:    "token: abcdef0123456789abcdef0123456789abcdef01",
+			wantHide: true,
+		},
+		{
+			name:     "ghp_ token redacted",
+			input:    "Authorization: ghp_" + strings.Repeat("a", 36),
+			wantHide: true,
+		},
+		{
+			name:     "fine-grained PAT redacted",
+			input:    "token=github_pat_" + strings.Repeat("b", 82),
+			wantHide: true,
+		},
+		{
+			name:     "bearer token redacted",
+			input:    "Bearer abc123xyz",
+			wantHide: true,
+		},
+		{
+			name:     "authorization header redacted",
+			input:    "Authorization: Bearer token123",
+			wantHide: true,
+		},
+		{
+			name:     "normal text not redacted",
+			input:    "This is just a normal log message",
+			wantHide: false,
+		},
+		{
+			name:     "URL not redacted",
+			input:    "https://github.com/owner/repo/pull/123",
+			wantHide: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := sanitizeForLog(tt.input)
+
+			if tt.wantHide {
+				// Should contain REDACTED marker
+				if !strings.Contains(result, "[REDACTED") {
+					t.Errorf("sanitizeForLog() = %v, should contain redaction marker", result)
+				}
+				// Should not contain original sensitive data patterns
+				if strings.Contains(result, "ghp_") || strings.Contains(result, "github_pat_") {
+					t.Errorf("sanitizeForLog() = %v, still contains sensitive pattern", result)
+				}
+			} else {
+				// Should be unchanged
+				if result != tt.input {
+					t.Errorf("sanitizeForLog() = %v, want %v", result, tt.input)
+				}
 			}
 		})
 	}

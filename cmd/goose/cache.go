@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/codeGROOVE-dev/goose/pkg/safebrowse"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 )
@@ -97,7 +98,7 @@ func (app *App) checkCache(cacheFile, url string, updatedAt time.Time) (cachedDa
 func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, bool, error) {
 	hasRunningTests := false
 	// Validate URL before processing
-	if err := validateURL(url); err != nil {
+	if err := safebrowse.ValidateURL(url); err != nil {
 		return nil, false, fmt.Errorf("invalid URL: %w", err)
 	}
 
