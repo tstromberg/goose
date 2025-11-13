@@ -263,6 +263,13 @@ func (app *App) setTrayTitle() {
 		"outgoing_blocked", counts.OutgoingBlocked)
 	app.systrayInterface.SetTitle(title)
 	app.setTrayIcon(iconType, counts)
+
+	// Update tooltip to match current state
+	tooltip := "Review Goose"
+	if app.targetUser != "" {
+		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
+	}
+	systray.SetTooltip(tooltip)
 }
 
 // addPRSection adds a section of PRs to the menu.
