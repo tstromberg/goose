@@ -72,9 +72,21 @@ func openURL(ctx context.Context, rawURL string, gooseParam string) error {
 		slog.Debug("Executing command", "command", "rundll32.exe url.dll,FileProtocolHandler", "url", rawURL)
 		cmd = exec.CommandContext(ctx, "rundll32.exe", "url.dll,FileProtocolHandler", rawURL)
 	default:
-		// Use xdg-open with full path for Linux and other Unix-like systems
-		slog.Debug("Executing command", "command", "/usr/bin/xdg-open", "url", rawURL)
-		cmd = exec.CommandContext(ctx, "/usr/bin/xdg-open", rawURL)
+		// Use xdg-open for Linux, FreeBSD, and other Unix-like systems
+		// Check PATH first, then common locations
+		paths := []string{"xdg-open", "/usr/local/bin/xdg-open", "/usr/bin/xdg-open", "/usr/pkg/bin/xdg-open", "/opt/local/bin/xdg-open"}
+		var xdgOpenPath string
+		for _, p := range paths {
+			if path, err := exec.LookPath(p); err == nil {
+				xdgOpenPath = path
+				break
+			}
+		}
+		if xdgOpenPath == "" {
+			return errors.New("xdg-open not found")
+		}
+		slog.Debug("Executing command", "command", xdgOpenPath, "url", rawURL)
+		cmd = exec.CommandContext(ctx, xdgOpenPath, rawURL)
 	}
 
 	if err := cmd.Start(); err != nil {
