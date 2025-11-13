@@ -908,19 +908,16 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr *PR, autoBrowserEnabled bo
 			"is_draft", pr.IsDraft,
 			"age_since_creation", time.Since(pr.CreatedAt).Round(time.Second),
 			"age_since_update", time.Since(pr.UpdatedAt).Round(time.Second))
-		// Use strict validation for auto-opened URLs
-		// Validate against strict GitHub PR URL pattern for auto-opening
-		if err := validateGitHubPRURL(pr.URL); err != nil {
-			slog.Warn("Auto-open strict validation failed", "url", sanitizeForLog(pr.URL), "error", err)
-			return
-		}
+		// Use strict GitHub PR validation for auto-opening
 		// Use ActionKind as the goose parameter value, or "next_action" if not set
 		gooseParam := pr.ActionKind
 		if gooseParam == "" {
 			gooseParam = "next_action"
 		}
+
+		// OpenWithParams will validate the URL and add the goose parameter
 		if err := openURL(ctx, pr.URL, gooseParam); err != nil {
-			slog.Error("[BROWSER] Failed to auto-open PR", "url", pr.URL, "error", err)
+			slog.Error("[BROWSER] Failed to auto-open PR", "url", sanitizeForLog(pr.URL), "error", err)
 		} else {
 			app.browserRateLimiter.RecordOpen(pr.URL)
 			slog.Info("[BROWSER] Successfully opened PR in browser",
