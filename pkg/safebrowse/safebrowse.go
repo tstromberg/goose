@@ -19,7 +19,7 @@ func Open(ctx context.Context, rawURL string) error {
 	if err := validate(rawURL, false); err != nil {
 		return err
 	}
-	return open(ctx, rawURL)
+	return openBrowser(ctx, rawURL)
 }
 
 // OpenWithParams validates and opens a URL with query parameters.
@@ -60,7 +60,7 @@ func OpenWithParams(ctx context.Context, rawURL string, params map[string]string
 		return err
 	}
 
-	return open(ctx, finalURL)
+	return openBrowser(ctx, finalURL)
 }
 
 // ValidateURL performs strict security validation on a URL.
@@ -75,7 +75,11 @@ func ValidateGitHubPRURL(rawURL string) error {
 	}
 
 	// Additional GitHub PR-specific checks
-	u, _ := url.Parse(rawURL) // Already validated
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		// Should never happen since we already validated, but check anyway
+		return fmt.Errorf("parse url: %w", err)
+	}
 	if u.Host != "github.com" {
 		return errors.New("must be github.com")
 	}
@@ -86,7 +90,7 @@ func ValidateGitHubPRURL(rawURL string) error {
 	}
 
 	// Validate PR number (must start with 1-9)
-	if len(parts[3]) == 0 || parts[3][0] < '1' || parts[3][0] > '9' {
+	if parts[3] == "" || parts[3][0] < '1' || parts[3][0] > '9' {
 		return errors.New("PR number must start with 1-9")
 	}
 	for _, c := range parts[3] {
@@ -200,15 +204,15 @@ func validateParamString(s string) error {
 		return errors.New("cannot be empty")
 	}
 	for _, r := range s {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
 			return fmt.Errorf("contains invalid character %q", r)
 		}
 	}
 	return nil
 }
 
-// open opens a URL in the system browser.
-func open(ctx context.Context, rawURL string) error {
+// openBrowser opens a URL in the system browser.
+func openBrowser(ctx context.Context, rawURL string) error {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {

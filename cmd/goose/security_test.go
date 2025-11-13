@@ -261,11 +261,9 @@ func TestSanitizeForLog(t *testing.T) {
 				if strings.Contains(result, "ghp_") || strings.Contains(result, "github_pat_") {
 					t.Errorf("sanitizeForLog() = %v, still contains sensitive pattern", result)
 				}
-			} else {
+			} else if result != tt.input {
 				// Should be unchanged
-				if result != tt.input {
-					t.Errorf("sanitizeForLog() = %v, want %v", result, tt.input)
-				}
+				t.Errorf("sanitizeForLog() = %v, want %v", result, tt.input)
 			}
 		})
 	}

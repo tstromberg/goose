@@ -6,361 +6,224 @@ import (
 	"testing"
 )
 
-func TestValidateURL(t *testing.T) {
+func TestValidateURL_ValidURLs(t *testing.T) {
 	tests := []struct {
-		name    string
-		url     string
-		wantErr bool
+		name string
+		url  string
 	}{
-		// Valid URLs
-		{
-			name:    "valid GitHub PR URL",
-			url:     "https://github.com/owner/repo/pull/123",
-			wantErr: false,
-		},
-		{
-			name:    "valid GitHub repo URL",
-			url:     "https://github.com/owner/repo",
-			wantErr: false,
-		},
-		{
-			name:    "valid dashboard URL",
-			url:     "https://dash.ready-to-review.dev",
-			wantErr: false,
-		},
-		{
-			name:    "valid URL with path",
-			url:     "https://github.com/owner/repo/pulls",
-			wantErr: false,
-		},
-		{
-			name:    "valid URL with dots in domain",
-			url:     "https://api.github.com/repos/owner/repo",
-			wantErr: false,
-		},
-
-		// Invalid - basic security
-		{
-			name:    "empty string",
-			url:     "",
-			wantErr: true,
-		},
-		{
-			name:    "HTTP instead of HTTPS",
-			url:     "http://github.com/owner/repo",
-			wantErr: true,
-		},
-		{
-			name:    "FTP scheme",
-			url:     "ftp://example.com/file",
-			wantErr: true,
-		},
-		{
-			name:    "no scheme",
-			url:     "github.com/owner/repo",
-			wantErr: true,
-		},
-		{
-			name:    "URL too long",
-			url:     "https://github.com/" + strings.Repeat("a", 3000),
-			wantErr: true,
-		},
-
-		// Invalid - percent encoding (blocks %00, %0A, %0D, etc.)
-		{
-			name:    "percent-encoded null byte",
-			url:     "https://github.com/owner/repo%00",
-			wantErr: true,
-		},
-		{
-			name:    "percent-encoded newline",
-			url:     "https://github.com/owner/repo%0A",
-			wantErr: true,
-		},
-		{
-			name:    "percent-encoded carriage return",
-			url:     "https://github.com/owner/repo%0D",
-			wantErr: true,
-		},
-		{
-			name:    "percent-encoded space",
-			url:     "https://github.com/owner/repo%20",
-			wantErr: true,
-		},
-		{
-			name:    "percent-encoded slash",
-			url:     "https://github.com/owner%2Frepo",
-			wantErr: true,
-		},
-
-		// Invalid - control characters (Windows and Unix attacks)
-		{
-			name:    "null byte",
-			url:     "https://github.com/owner\x00/repo",
-			wantErr: true,
-		},
-		{
-			name:    "newline character",
-			url:     "https://github.com/owner/repo\n",
-			wantErr: true,
-		},
-		{
-			name:    "carriage return",
-			url:     "https://github.com/owner/repo\r",
-			wantErr: true,
-		},
-		{
-			name:    "tab character",
-			url:     "https://github.com/owner/repo\t",
-			wantErr: true,
-		},
-		{
-			name:    "vertical tab",
-			url:     "https://github.com/owner/repo\v",
-			wantErr: true,
-		},
-		{
-			name:    "form feed",
-			url:     "https://github.com/owner/repo\f",
-			wantErr: true,
-		},
-		{
-			name:    "bell character",
-			url:     "https://github.com/owner/repo\a",
-			wantErr: true,
-		},
-		{
-			name:    "backspace",
-			url:     "https://github.com/owner/repo\b",
-			wantErr: true,
-		},
-		{
-			name:    "delete character",
-			url:     "https://github.com/owner/repo\x7F",
-			wantErr: true,
-		},
-
-		// Invalid - shell metacharacters (Unix/Windows command injection)
-		{
-			name:    "semicolon",
-			url:     "https://github.com/owner/repo;ls",
-			wantErr: true,
-		},
-		{
-			name:    "pipe character",
-			url:     "https://github.com/owner/repo|cat",
-			wantErr: true,
-		},
-		{
-			name:    "ampersand",
-			url:     "https://github.com/owner/repo&",
-			wantErr: true,
-		},
-		{
-			name:    "backtick",
-			url:     "https://github.com/owner/repo`whoami`",
-			wantErr: true,
-		},
-		{
-			name:    "dollar sign",
-			url:     "https://github.com/owner/repo$PATH",
-			wantErr: true,
-		},
-		{
-			name:    "command substitution",
-			url:     "https://github.com/owner/repo$(whoami)",
-			wantErr: true,
-		},
-		{
-			name:    "parentheses",
-			url:     "https://github.com/owner/repo()",
-			wantErr: true,
-		},
-		{
-			name:    "curly braces",
-			url:     "https://github.com/owner/repo{}",
-			wantErr: true,
-		},
-		{
-			name:    "square brackets",
-			url:     "https://github.com/owner/repo[]",
-			wantErr: true,
-		},
-		{
-			name:    "less than",
-			url:     "https://github.com/owner/repo<file",
-			wantErr: true,
-		},
-		{
-			name:    "greater than",
-			url:     "https://github.com/owner/repo>file",
-			wantErr: true,
-		},
-
-		// Invalid - Windows-specific attack vectors
-		{
-			name:    "Windows path separator backslash",
-			url:     "https://github.com/owner\\repo",
-			wantErr: true,
-		},
-		{
-			name:    "Windows command separator",
-			url:     "https://github.com/owner/repo&&calc",
-			wantErr: true,
-		},
-		{
-			name:    "Windows batch variable",
-			url:     "https://github.com/owner/%TEMP%",
-			wantErr: true,
-		},
-		{
-			name:    "caret character (Windows escape)",
-			url:     "https://github.com/owner/repo^",
-			wantErr: true,
-		},
-
-		// Invalid - URL components we don't allow
-		{
-			name:    "user info in URL",
-			url:     "https://user@github.com/owner/repo",
-			wantErr: true,
-		},
-		{
-			name:    "password in URL",
-			url:     "https://user:pass@github.com/owner/repo",
-			wantErr: true,
-		},
-		{
-			name:    "fragment",
-			url:     "https://github.com/owner/repo#section",
-			wantErr: true,
-		},
-		{
-			name:    "query parameters (must use OpenWithParams)",
-			url:     "https://github.com/owner/repo?foo=bar",
-			wantErr: true,
-		},
-
-		// Invalid - Unicode/IDN attacks
-		{
-			name:    "Unicode character",
-			url:     "https://github.com/owner/repō",
-			wantErr: true,
-		},
-		{
-			name:    "IDN homograph attack (Cyrillic)",
-			url:     "https://gіthub.com/owner/repo", // Cyrillic 'і' instead of 'i'
-			wantErr: true,
-		},
-		{
-			name:    "Right-to-left override",
-			url:     "https://github.com/owner/repo\u202E",
-			wantErr: true,
-		},
-		{
-			name:    "Zero-width space",
-			url:     "https://github.com/owner\u200B/repo",
-			wantErr: true,
-		},
-
-		// Invalid - double encoding attacks
-		{
-			name:    "double-encoded null",
-			url:     "https://github.com/owner/repo%2500",
-			wantErr: true,
-		},
-
-		// Invalid - path traversal
-		{
-			name:    "dot dot slash",
-			url:     "https://github.com/../etc/passwd",
-			wantErr: true,
-		},
-		{
-			name:    "double slash in path",
-			url:     "https://github.com//owner/repo",
-			wantErr: true,
-		},
-
-		// Invalid - special characters
-		{
-			name:    "single quote",
-			url:     "https://github.com/owner'/repo",
-			wantErr: true,
-		},
-		{
-			name:    "double quote",
-			url:     "https://github.com/owner\"/repo",
-			wantErr: true,
-		},
-		{
-			name:    "plus sign",
-			url:     "https://github.com/owner+org/repo",
-			wantErr: true,
-		},
-		{
-			name:    "at sign",
-			url:     "https://github.com/owner@org/repo",
-			wantErr: true,
-		},
-		{
-			name:    "asterisk",
-			url:     "https://github.com/owner*/repo",
-			wantErr: true,
-		},
-		{
-			name:    "tilde",
-			url:     "https://github.com/~owner/repo",
-			wantErr: true,
-		},
-		{
-			name:    "exclamation",
-			url:     "https://github.com/owner!/repo",
-			wantErr: true,
-		},
-
-		// Invalid - custom ports (new security fix)
-		{
-			name:    "custom port 8080",
-			url:     "https://github.com:8080/owner/repo",
-			wantErr: true,
-		},
-		{
-			name:    "SSH port 22",
-			url:     "https://github.com:22/owner/repo",
-			wantErr: true,
-		},
-		{
-			name:    "explicit HTTPS port 443",
-			url:     "https://github.com:443/owner/repo",
-			wantErr: true,
-		},
-
-		// Invalid - colon in path (new security fix)
-		{
-			name:    "colon in path",
-			url:     "https://github.com/owner:repo/path",
-			wantErr: true,
-		},
-
-		// Valid - case normalization (should pass)
-		{
-			name:    "uppercase domain",
-			url:     "https://GITHUB.COM/owner/repo",
-			wantErr: false, // Now normalized to lowercase
-		},
-		{
-			name:    "mixed case domain",
-			url:     "https://GitHub.Com/owner/repo",
-			wantErr: false, // Now normalized to lowercase
-		},
+		{"valid GitHub PR URL", "https://github.com/owner/repo/pull/123"},
+		{"valid GitHub repo URL", "https://github.com/owner/repo"},
+		{"valid dashboard URL", "https://dash.ready-to-review.dev"},
+		{"valid URL with path", "https://github.com/owner/repo/pulls"},
+		{"valid URL with dots in domain", "https://api.github.com/repos/owner/repo"},
+		{"uppercase domain", "https://GITHUB.COM/owner/repo"},
+		{"mixed case domain", "https://GitHub.Com/owner/repo"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateURL(tt.url)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateURL() error = %v, wantErr %v", err, tt.wantErr)
+			if err := ValidateURL(tt.url); err != nil {
+				t.Errorf("ValidateURL() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestValidateURL_BasicSecurity(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"empty string", ""},
+		{"HTTP instead of HTTPS", "http://github.com/owner/repo"},
+		{"FTP scheme", "ftp://example.com/file"},
+		{"no scheme", "github.com/owner/repo"},
+		{"URL too long", "https://github.com/" + strings.Repeat("a", 3000)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_PercentEncoding(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"percent-encoded null byte", "https://github.com/owner/repo%00"},
+		{"percent-encoded newline", "https://github.com/owner/repo%0A"},
+		{"percent-encoded carriage return", "https://github.com/owner/repo%0D"},
+		{"percent-encoded space", "https://github.com/owner/repo%20"},
+		{"percent-encoded slash", "https://github.com/owner%2Frepo"},
+		{"double-encoded null", "https://github.com/owner/repo%2500"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_ControlCharacters(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"null byte", "https://github.com/owner\x00/repo"},
+		{"newline character", "https://github.com/owner/repo\n"},
+		{"carriage return", "https://github.com/owner/repo\r"},
+		{"tab character", "https://github.com/owner/repo\t"},
+		{"vertical tab", "https://github.com/owner/repo\v"},
+		{"form feed", "https://github.com/owner/repo\f"},
+		{"bell character", "https://github.com/owner/repo\a"},
+		{"backspace", "https://github.com/owner/repo\b"},
+		{"delete character", "https://github.com/owner/repo\x7F"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_ShellMetacharacters(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"semicolon", "https://github.com/owner/repo;ls"},
+		{"pipe character", "https://github.com/owner/repo|cat"},
+		{"ampersand", "https://github.com/owner/repo&"},
+		{"backtick", "https://github.com/owner/repo`whoami`"},
+		{"dollar sign", "https://github.com/owner/repo$PATH"},
+		{"command substitution", "https://github.com/owner/repo$(whoami)"},
+		{"parentheses", "https://github.com/owner/repo()"},
+		{"curly braces", "https://github.com/owner/repo{}"},
+		{"square brackets", "https://github.com/owner/repo[]"},
+		{"less than", "https://github.com/owner/repo<file"},
+		{"greater than", "https://github.com/owner/repo>file"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_WindowsAttacks(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"Windows path separator backslash", "https://github.com/owner\\repo"},
+		{"Windows command separator", "https://github.com/owner/repo&&calc"},
+		{"Windows batch variable", "https://github.com/owner/%TEMP%"},
+		{"caret character (Windows escape)", "https://github.com/owner/repo^"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_URLComponents(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"user info in URL", "https://user@github.com/owner/repo"},
+		{"password in URL", "https://user:pass@github.com/owner/repo"},
+		{"fragment", "https://github.com/owner/repo#section"},
+		{"query parameters (must use OpenWithParams)", "https://github.com/owner/repo?foo=bar"},
+		{"custom port 8080", "https://github.com:8080/owner/repo"},
+		{"SSH port 22", "https://github.com:22/owner/repo"},
+		{"explicit HTTPS port 443", "https://github.com:443/owner/repo"},
+		{"colon in path", "https://github.com/owner:repo/path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_UnicodeAttacks(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"Unicode character", "https://github.com/owner/repō"},
+		{"IDN homograph attack (Cyrillic)", "https://gіthub.com/owner/repo"}, // Cyrillic 'і' instead of 'i'
+		{"Right-to-left override", "https://github.com/owner/repo\u202E"},
+		{"Zero-width space", "https://github.com/owner\u200B/repo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_PathTraversal(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"dot dot slash", "https://github.com/../etc/passwd"},
+		{"double slash in path", "https://github.com//owner/repo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateURL_SpecialCharacters(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"single quote", "https://github.com/owner'/repo"},
+		{"double quote", "https://github.com/owner\"/repo"},
+		{"plus sign", "https://github.com/owner+org/repo"},
+		{"at sign", "https://github.com/owner@org/repo"},
+		{"asterisk", "https://github.com/owner*/repo"},
+		{"tilde", "https://github.com/~owner/repo"},
+		{"exclamation", "https://github.com/owner!/repo"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateURL(tt.url); err == nil {
+				t.Errorf("ValidateURL() error = nil, want error")
 			}
 		})
 	}
