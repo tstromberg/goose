@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeGROOVE-dev/goose/cmd/goose/x11tray"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray"
@@ -110,6 +111,7 @@ type App struct {
 	enableAutoBrowser            bool
 }
 
+//nolint:maintidx // Main function complexity is acceptable for initialization logic
 func main() {
 	// Parse command line flags
 	var targetUser string
@@ -294,6 +296,15 @@ func main() {
 		slog.Info("Skipping user load - no GitHub client available")
 	}
 
+	slog.Info("Checking system tray availability...")
+	trayProxy, err := x11tray.EnsureTray(ctx)
+	if err != nil {
+		slog.Error("FATAL: System tray unavailable",
+			"error", err,
+			"help", "Ensure your desktop environment has a system tray, or install snixembed")
+		os.Exit(1)
+	}
+
 	slog.Info("Starting systray...")
 	// Create a cancellable context for the application
 	appCtx, cancel := context.WithCancel(ctx)
@@ -304,6 +315,13 @@ func main() {
 		cancel() // Cancel the context to stop goroutines
 		if app.sprinklerMonitor != nil {
 			app.sprinklerMonitor.stop()
+		}
+		// Stop tray proxy if we started one
+		if trayProxy != nil {
+			slog.Info("Stopping system tray proxy")
+			if err := trayProxy.Stop(); err != nil {
+				slog.Warn("Failed to stop tray proxy cleanly", "error", err)
+			}
 		}
 		app.cleanupOldCache()
 	})
@@ -354,9 +372,9 @@ func (app *App) handleReauthentication(ctx context.Context) {
 	}
 
 	// Update tooltip
-	tooltip := "Goose - Loading PRs..."
+	tooltip := "Review Goose"
 	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("Goose - Loading PRs... (@%s)", app.targetUser)
+		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
 	}
 	systray.SetTooltip(tooltip)
 
@@ -423,7 +441,10 @@ func (app *App) onReady(ctx context.Context) {
 			}
 		}
 
+		// On Unix platforms with snixembed, menu display is controlled by physical
+		// right-clicks detected by snixembed. Left-click is used for refresh action.
 		if menu != nil {
+			// On macOS/Windows, show the menu
 			if err := menu.ShowMenu(); err != nil {
 				slog.Error("Failed to show menu", "error", err)
 			}
@@ -433,16 +454,19 @@ func (app *App) onReady(ctx context.Context) {
 	systray.SetOnRClick(func(menu systray.IMenu) {
 		slog.Debug("Right click detected")
 		if menu != nil {
+			// On macOS/Windows, explicitly show the menu
 			if err := menu.ShowMenu(); err != nil {
 				slog.Error("Failed to show menu", "error", err)
 			}
 		}
+		// On Unix platforms with snixembed, the menu is automatically shown
+		// by snixembed when it detects the right-click
 	})
 
 	// Check if we have an auth error
 	if app.authError != "" {
 		systray.SetTitle("")
-		app.setTrayIcon(IconLock)
+		app.setTrayIcon(IconLock, PRCounts{})
 		systray.SetTooltip("Goose - Authentication Error")
 		// Create initial error menu
 		app.rebuildMenu(ctx)
@@ -452,12 +476,12 @@ func (app *App) onReady(ctx context.Context) {
 	}
 
 	systray.SetTitle("")
-	app.setTrayIcon(IconSmiling) // Start with smiling icon while loading
+	app.setTrayIcon(IconSmiling, PRCounts{}) // Start with smiling icon while loading
 
 	// Set tooltip based on whether we're using a custom user
-	tooltip := "Goose - Loading PRs..."
+	tooltip := "Review Goose"
 	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("Goose - Loading PRs... (@%s)", app.targetUser)
+		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
 	}
 	systray.SetTooltip(tooltip)
 
@@ -476,7 +500,7 @@ func (app *App) updateLoop(ctx context.Context) {
 
 			// Set error state in UI
 			systray.SetTitle("")
-			app.setTrayIcon(IconWarning)
+			app.setTrayIcon(IconWarning, PRCounts{})
 			systray.SetTooltip("Goose - Critical error")
 
 			// Update failure count
@@ -564,7 +588,7 @@ func (app *App) updatePRs(ctx context.Context) {
 		}
 
 		systray.SetTitle("")
-		app.setTrayIcon(iconType)
+		app.setTrayIcon(iconType, PRCounts{})
 
 		// Include time since last success and user info
 		timeSinceSuccess := "never"
@@ -745,7 +769,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 		}
 
 		systray.SetTitle("")
-		app.setTrayIcon(iconType)
+		app.setTrayIcon(iconType, PRCounts{})
 		systray.SetTooltip(tooltip)
 
 		// Create or update menu to show error state
@@ -884,19 +908,16 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr *PR, autoBrowserEnabled bo
 			"is_draft", pr.IsDraft,
 			"age_since_creation", time.Since(pr.CreatedAt).Round(time.Second),
 			"age_since_update", time.Since(pr.UpdatedAt).Round(time.Second))
-		// Use strict validation for auto-opened URLs
-		// Validate against strict GitHub PR URL pattern for auto-opening
-		if err := validateGitHubPRURL(pr.URL); err != nil {
-			slog.Warn("Auto-open strict validation failed", "url", sanitizeForLog(pr.URL), "error", err)
-			return
-		}
+		// Use strict GitHub PR validation for auto-opening
 		// Use ActionKind as the goose parameter value, or "next_action" if not set
 		gooseParam := pr.ActionKind
 		if gooseParam == "" {
 			gooseParam = "next_action"
 		}
+
+		// OpenWithParams will validate the URL and add the goose parameter
 		if err := openURL(ctx, pr.URL, gooseParam); err != nil {
-			slog.Error("[BROWSER] Failed to auto-open PR", "url", pr.URL, "error", err)
+			slog.Error("[BROWSER] Failed to auto-open PR", "url", sanitizeForLog(pr.URL), "error", err)
 		} else {
 			app.browserRateLimiter.RecordOpen(pr.URL)
 			slog.Info("[BROWSER] Successfully opened PR in browser",

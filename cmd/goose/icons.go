@@ -4,9 +4,9 @@ import (
 	"log/slog"
 )
 
-// Icon variables are defined in platform-specific files:
-// - icons_windows.go: uses .ico files.
-// - icons_unix.go: uses .png files.
+// Icon implementations are in platform-specific files:
+//   - icons_darwin.go: macOS (static PNG icons, counts shown in title)
+//   - icons_badge.go: Linux/BSD/Windows (dynamic circle badges with counts)
 
 // IconType represents different icon states.
 type IconType int
@@ -21,33 +21,20 @@ const (
 	IconLock                      // Authentication error
 )
 
-// getIcon returns the icon bytes for the given type.
-func getIcon(iconType IconType) []byte {
-	switch iconType {
-	case IconGoose, IconBoth:
-		// For both, we'll use the goose icon as primary
-		return iconGoose
-	case IconPopper:
-		return iconPopper
-	case IconCockroach:
-		return iconCockroach
-	case IconWarning:
-		return iconWarning
-	case IconLock:
-		return iconLock
-	default:
-		return iconSmiling
-	}
-}
+// getIcon returns icon bytes for the given type and counts.
+// Implementation is platform-specific:
+//   - macOS: returns static icons (counts displayed in title bar)
+//   - Linux/Windows: generates dynamic badges with embedded counts.
+// Implemented in icons_darwin.go and icons_badge.go.
 
-// setTrayIcon updates the system tray icon based on PR counts.
-func (app *App) setTrayIcon(iconType IconType) {
-	iconBytes := getIcon(iconType)
+// setTrayIcon updates the system tray icon.
+func (app *App) setTrayIcon(iconType IconType, counts PRCounts) {
+	iconBytes := getIcon(iconType, counts)
 	if len(iconBytes) == 0 {
-		slog.Warn("Icon bytes are empty, skipping icon update", "type", iconType)
+		slog.Warn("icon bytes empty, skipping update", "type", iconType)
 		return
 	}
 
 	app.systrayInterface.SetIcon(iconBytes)
-	slog.Debug("[TRAY] Setting icon", "type", iconType)
+	slog.Debug("tray icon updated", "type", iconType, "incoming", counts.IncomingBlocked, "outgoing", counts.OutgoingBlocked)
 }

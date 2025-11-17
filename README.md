@@ -12,24 +12,6 @@ The only PR tracker that honks at you when you're the bottleneck. Now shipping w
 Lives in your menubar like a tiny waterfowl of productivity shame, watching your GitHub PRs and making aggressive bird sounds when you're blocking someone's code from seeing the light of production.
 
 ![Review Goose Screenshot](media/screenshot.png)
-
-## What It Does
-
-- **Honks** when you're blocking someone's PR (authentic goose noises included)
-- **Jet sounds** when your own PR is ready for the next stage
-- **Smart turn-based assignment** - knows who is blocking a PR, knows when tests are failing, etc.
-- **Auto-start** on login (macOS)
-- **Auto-open** incoming PRs in your browser (off by default, rate-limited)
-- **Org Filtering** for orgs you may not care about in a home or work context
-* **Multi-platform** support for Linux, macOS, Windows, FreeBSD, whatever.
-
-You can also visit the web-based dashboard at https://dash.ready-to-review.dev/
-
-## Dependencies
-
-* [go](https://go.dev/) 1.23.4 or higher
-* [gh](https://cli.github.com/), AKA the GitHub command-line utility
-
 ## macOS Quick Start ⚡ (Get Honked At)
 
 Install dependencies:
@@ -53,7 +35,19 @@ cd goose && make run
 
 This will will cause the goose to implant itself into `/Applications/Review Goose.app` for future invocations. To be persistently annoyed every time you login, click the `Start at Login` menu item.
 
-### Using a fine-grained access token
+## Linux/BSD/Windows Quick Start
+
+1. Install the GitHub CLI and Go via your platforms recommended methods
+2. Compile and install Goose:
+
+```bash
+go install github.com/codeGROOVE-dev/goose/cmd/goose@latest
+```
+
+3. Copy goose from $HOME/go/bin to wherever you prefer
+4. Add goose to your auto-login so you never foget about PRs again
+
+## Using a fine-grained access token
 
 If you want more control over which repositories the goose can access, you can use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with the following permissions:
 
@@ -68,13 +62,19 @@ env GITHUB_TOKEN=your_token_here goose
 
 We don't yet persist fine-grained tokens to disk - PR's welcome!
 
+## Usage
+
+- **macOS/Windows**: Click the tray icon to show the menu
+- **Linux/BSD**: Right-click the tray icon to show the menu (left-click refreshes PRs)
+
 ## Known Issues
 
-- Visual notifications won't work on macOS until we release signed binaries.
+- Visual notifications won't work reliably on macOS until we release signed binaries.
+- Tray icons on GNOME require [snixembed](https://git.sr.ht/~steef/snixembed) and enabling the [Legacy Tray extension](https://www.omgubuntu.co.uk/2024/08/gnome-official-status-icons-extension). Goose will automatically launch snixembed if needed, but you must install it first (e.g., `apt install snixembed` or `yay -S snixembed`).
 
 ## Pricing
 
-- Free forever for public repositories ❤️
+- Free forever for public open-source repositories ❤️
 - Private repo access will soon be a supporter-only feature to ensure the goose is fed. ($1/mo)
 
 ## Privacy
@@ -84,6 +84,10 @@ We don't yet persist fine-grained tokens to disk - PR's welcome!
 - PR metadata may be cached locally & remotely for up to 20 days
 - No data is resold to anyone. We don't even want it.
 - No telemetry is collected
+
+## License
+
+This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
