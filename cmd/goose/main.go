@@ -40,7 +40,7 @@ const (
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
 	defaultUpdateInterval     = 1 * time.Minute
-	blockedPRIconDuration     = 15 * time.Minute
+	blockedPRIconDuration     = 5 * time.Minute
 	maxRetryDelay             = 2 * time.Minute
 	maxRetries                = 10
 	minorFailureThreshold     = 3
