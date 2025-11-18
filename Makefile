@@ -5,10 +5,13 @@ BUNDLE_VERSION = 1
 BUNDLE_ID = dev.codegroove.r2r
 
 # Version information for builds
-GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Try VERSION file first (for release tarballs), then fall back to git
+VERSION_FILE := $(shell cat cmd/goose/VERSION 2>/dev/null)
+GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
+BUILD_VERSION := $(or $(VERSION_FILE),$(GIT_VERSION),dev)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS := -X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
+LDFLAGS := -X main.version=$(BUILD_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
 
 .PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows test release
 
@@ -278,6 +281,12 @@ release:
 	@$(MAKE) test
 	@echo "Running linters..."
 	@$(MAKE) lint
+	@echo "Creating VERSION file..."
+	@echo "$(VERSION)" > cmd/goose/VERSION
+	@git add cmd/goose/VERSION
+	@if [ -n "$$(git diff --cached --name-only)" ]; then \
+		git commit -m "Release $(VERSION)"; \
+	fi
 	@echo "Checking for uncommitted changes..."
 	@if [ -n "$$(git status --porcelain)" ]; then \
 		echo "Error: Working directory has uncommitted changes"; \
@@ -286,6 +295,7 @@ release:
 	fi
 	@echo "Creating and pushing tag $(VERSION)..."
 	@git tag -a "$(VERSION)" -m "Release $(VERSION)"
+	@git push origin main
 	@git push origin "$(VERSION)"
 	@echo "✓ Release $(VERSION) created and pushed successfully"
 	@echo "  View release at: https://github.com/codeGROOVE-dev/goose/releases/tag/$(VERSION)"
