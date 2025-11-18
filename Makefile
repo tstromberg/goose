@@ -13,13 +13,31 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -X main.version=$(BUILD_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
 
-.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows test release
-
-test:
-	go test -race ./...
+.PHONY: all build build-all build-darwin build-linux build-windows clean deps run app-bundle app-bundle-universal install install-darwin install-unix install-windows test release help
 
 # Default target
 all: build
+
+# Show available make targets
+help:
+	@echo "Available targets:"
+	@echo "  make build                 - Build for current platform"
+	@echo "  make build-all             - Build for all platforms"
+	@echo "  make build-darwin          - Build for macOS (amd64 and arm64)"
+	@echo "  make build-linux           - Build for Linux (amd64 and arm64)"
+	@echo "  make build-windows         - Build for Windows (amd64 and arm64)"
+	@echo "  make app-bundle            - Create macOS .app bundle (native arch)"
+	@echo "  make app-bundle-universal  - Create macOS .app bundle (universal)"
+	@echo "  make install               - Install application for current platform"
+	@echo "  make test                  - Run tests with race detector"
+	@echo "  make lint                  - Run linters"
+	@echo "  make fix                   - Run auto-fixers"
+	@echo "  make clean                 - Remove build artifacts"
+	@echo "  make release VERSION=vX.Y.Z - Create and push a new release tag"
+
+test:
+	@echo "Running tests with race detector..."
+	@go test -race ./...
 
 # Install dependencies
 deps:
@@ -39,95 +57,99 @@ endif
 # Build for current platform
 build: out
 ifeq ($(OS),Windows_NT)
-	CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME).exe ./cmd/review-goose
+	@echo "Building $(APP_NAME) for Windows..."
+	@CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME).exe ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME).exe"
 else
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME) ./cmd/review-goose
+	@echo "Building $(APP_NAME) for $(shell uname -s)/$(shell uname -m)..."
+	@CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME) ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME)"
 endif
 
 # Build for all platforms
 build-all: build-darwin build-linux build-windows
 
-# Build for macOS
-build-darwin:
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 ./cmd/review-goose
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 ./cmd/review-goose
+# Build for macOS (both architectures)
+build-darwin: out
+	@echo "Building $(APP_NAME) for darwin/amd64..."
+	@CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME)-darwin-amd64"
+	@echo "Building $(APP_NAME) for darwin/arm64..."
+	@CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME)-darwin-arm64"
 
-# Build for Linux
-build-linux:
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 ./cmd/review-goose
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 ./cmd/review-goose
+# Build for Linux (both architectures)
+# Note: CGO cross-compilation requires appropriate cross-compiler toolchain
+build-linux: out
+	@echo "Building $(APP_NAME) for linux/amd64..."
+	@CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME)-linux-amd64"
+	@echo "Building $(APP_NAME) for linux/arm64..."
+	@CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME)-linux-arm64"
 
-# Build for Windows
-build-windows:
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe ./cmd/review-goose
-	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe ./cmd/review-goose
+# Build for Windows (both architectures)
+# Note: CGO cross-compilation requires appropriate cross-compiler toolchain
+build-windows: out
+	@echo "Building $(APP_NAME) for windows/amd64..."
+	@CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME)-windows-amd64.exe"
+	@echo "Building $(APP_NAME) for windows/arm64..."
+	@CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe ./cmd/review-goose
+	@echo "✓ Created: out/$(APP_NAME)-windows-arm64.exe"
 
 # Clean build artifacts
 clean:
-	rm -rf out/
+	@echo "Cleaning build artifacts..."
+	@rm -rf out/
 
 # Create out directory
 out:
-	mkdir -p out
+	@mkdir -p out
 
-# Install appify if not already installed
-install-appify:
-	@if ! command -v appify &> /dev/null; then \
-		echo "Installing appify..."; \
-		go install github.com/machinebox/appify@latest; \
-	else \
-		echo "appify is already installed"; \
-	fi
+# Install appify to out/tools directory (pinned version)
+APPIFY_COMMIT := 15c1e09ce9247bfd78610ac4831dd0a3cb02483c
+APPIFY_BIN := out/tools/appify-$(APPIFY_COMMIT)
+$(APPIFY_BIN):
+	@echo "Installing appify ($(APPIFY_COMMIT))..."
+	@mkdir -p out/tools
+	@GOBIN=$(shell pwd)/out/tools go install github.com/machinebox/appify@$(APPIFY_COMMIT) 2>&1 | grep -v "go: finding\|go: downloading\|go: found" || true
+	@mv out/tools/appify $@
 
-# Build macOS application bundle using appify
-app-bundle: out build-darwin install-appify
+install-appify: $(APPIFY_BIN)
+
+# Internal helper to create app bundle from a binary
+# Usage: make _create-app-bundle BUNDLE_BINARY=review-goose
+define create-app-bundle
 	@echo "Removing old app bundle..."
 	@rm -rf "out/$(BUNDLE_NAME).app"
 
 	@echo "Creating macOS application bundle with appify..."
-
-	# Create universal binary
-	@echo "Creating universal binary..."
-	lipo -create out/$(APP_NAME)-darwin-amd64 out/$(APP_NAME)-darwin-arm64 \
-		-output out/$(APP_NAME)-universal
-
-	# Copy logo to out directory
-	cp media/logo.png out/logo.png
-
-	# Create menubar icon (small version with transparency)
+	@cp media/logo.png out/logo.png
 	@echo "Creating menubar icon..."
-	sips -z 44 44 media/logo.png --out out/menubar-icon.png
-	# Ensure the icon has an alpha channel
-	sips -s format png out/menubar-icon.png --out out/menubar-icon.png
+	@sips -z 44 44 media/logo.png --out out/menubar-icon.png >/dev/null 2>&1
+	@sips -s format png out/menubar-icon.png --out out/menubar-icon.png >/dev/null 2>&1
 
-	# Create app bundle with appify using universal binary
-	cd out && appify -name "$(BUNDLE_NAME)" \
+	cd out && ../$(APPIFY_BIN) -name "$(BUNDLE_NAME)" \
 		-icon logo.png \
 		-id "$(BUNDLE_ID)" \
-		$(APP_NAME)-universal
+		$(1)
 
-	# Move the generated app to the expected location
-	@if [ -f "out/$(BUNDLE_NAME)-universal.app" ]; then \
-		mv "out/$(BUNDLE_NAME)-universal.app" "out/$(BUNDLE_NAME).app"; \
+	@if [ -f "out/$(BUNDLE_NAME)-$(1).app" ]; then \
+		mv "out/$(BUNDLE_NAME)-$(1).app" "out/$(BUNDLE_NAME).app"; \
 	elif [ ! -d "out/$(BUNDLE_NAME).app" ]; then \
 		echo "Warning: App bundle not found in expected location"; \
 	fi
 
-	# Copy menubar icon to Resources
 	@echo "Copying menubar icon to app bundle..."
-	cp out/menubar-icon.png "out/$(BUNDLE_NAME).app/Contents/Resources/menubar-icon.png"
+	@cp out/menubar-icon.png "out/$(BUNDLE_NAME).app/Contents/Resources/menubar-icon.png"
+	@mkdir -p "out/$(BUNDLE_NAME).app/Contents/Resources/en.lproj"
 
-	# Create English localization
-	@echo "Creating English localization..."
-	mkdir -p "out/$(BUNDLE_NAME).app/Contents/Resources/en.lproj"
-
-	# Fix the executable name (appify adds .app suffix which we don't want)
 	@echo "Fixing executable name..."
 	@if [ -f "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME).app" ]; then \
 		mv "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME).app" "out/$(BUNDLE_NAME).app/Contents/MacOS/$(BUNDLE_NAME)"; \
 	fi
 
-	# Fix the Info.plist
 	@echo "Fixing Info.plist..."
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Review\\ Goose" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
@@ -143,14 +165,23 @@ app-bundle: out build-darwin install-appify
 	@/usr/libexec/PlistBuddy -c "Add :CFBundleGetInfoString string 'Review Goose $(BUILD_VERSION)'" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :CFBundleGetInfoString 'Review Goose $(BUILD_VERSION)'" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 
-	# Remove extended attributes and code sign the app bundle
-	@echo "Preparing app bundle for signing..."
-	xattr -cr "out/$(BUNDLE_NAME).app"
-
 	@echo "Code signing the app bundle..."
-	codesign --force --deep --sign - --options runtime "out/$(BUNDLE_NAME).app"
+	@xattr -cr "out/$(BUNDLE_NAME).app"
+	@codesign --force --deep --sign - --options runtime "out/$(BUNDLE_NAME).app" >/dev/null 2>&1
 
-	@echo "macOS app bundle created: out/$(BUNDLE_NAME).app"
+	@echo "✓ macOS app bundle created: out/$(BUNDLE_NAME).app"
+endef
+
+# Build macOS application bundle using appify (native architecture only)
+app-bundle: out build install-appify
+	$(call create-app-bundle,$(APP_NAME))
+
+# Build macOS universal application bundle (both arm64 and amd64)
+app-bundle-universal: out build-darwin install-appify
+	@echo "Creating universal binary..."
+	@lipo -create out/$(APP_NAME)-darwin-amd64 out/$(APP_NAME)-darwin-arm64 \
+		-output out/$(APP_NAME)-universal
+	$(call create-app-bundle,$(APP_NAME)-universal)
 
 # Install the application (detects OS automatically)
 install:
@@ -283,9 +314,9 @@ release:
 		echo "Error: Tag $(VERSION) already exists"; \
 		exit 1; \
 	fi
-	@echo "Running tests..."
+	@echo "→ Running tests..."
 	@$(MAKE) test
-	@echo "Running linters..."
+	@echo "→ Running linters..."
 	@$(MAKE) lint
 	@echo "Creating VERSION file..."
 	@echo "$(VERSION)" > cmd/review-goose/VERSION
