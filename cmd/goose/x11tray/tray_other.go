@@ -1,5 +1,7 @@
 //go:build !linux && !freebsd && !openbsd && !netbsd && !dragonfly && !solaris && !illumos && !aix
 
+// Package x11tray provides system tray proxy support for Unix-like systems.
+// On non-Unix platforms (macOS, Windows), the systray library handles tray functionality natively.
 package x11tray
 
 import (
@@ -16,18 +18,18 @@ func HealthCheck() error {
 type ProxyProcess struct{}
 
 // Stop is a no-op on non-Unix platforms.
-func (p *ProxyProcess) Stop() error {
+func (*ProxyProcess) Stop() error {
 	return nil
 }
 
-// TryProxy is not needed on non-Unix platforms and always returns nil.
-func TryProxy(ctx context.Context) (*ProxyProcess, error) {
-	return nil, nil
+// TryProxy is not needed on non-Unix platforms.
+func TryProxy(_ context.Context) (*ProxyProcess, error) {
+	return &ProxyProcess{}, nil
 }
 
 // EnsureTray always succeeds on non-Unix platforms.
-func EnsureTray(ctx context.Context) (*ProxyProcess, error) {
-	return nil, nil
+func EnsureTray(_ context.Context) (*ProxyProcess, error) {
+	return &ProxyProcess{}, nil
 }
 
 // ShowContextMenu is a no-op on non-Unix platforms.

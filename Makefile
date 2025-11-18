@@ -269,8 +269,8 @@ release:
 		exit 1; \
 	fi
 	@echo "Creating release $(VERSION)..."
-	@if ! echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then \
-		echo "Error: VERSION must be in format vX.Y.Z (e.g., v1.0.0)"; \
+	@if ! echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then \
+		echo "Error: VERSION must be in format vX.Y.Z or vX.Y.Z-suffix (e.g., v1.0.0, v1.0.0-alpha)"; \
 		exit 1; \
 	fi
 	@if git rev-parse "$(VERSION)" >/dev/null 2>&1; then \
