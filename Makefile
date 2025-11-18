@@ -136,6 +136,10 @@ app-bundle: out build-darwin install-appify
 		/usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion en" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :NSUserNotificationAlertStyle string alert" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :NSUserNotificationAlertStyle alert" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
+		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
+		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 
 	# Remove extended attributes and code sign the app bundle
 	@echo "Preparing app bundle for signing..."
