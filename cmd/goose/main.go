@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -24,12 +25,31 @@ import (
 	"github.com/google/go-github/v57/github"
 )
 
+// VERSION file embedded at compile time (created by make release)
+//
+//go:embed VERSION
+var versionFile string
+
 // Version information - set during build with -ldflags.
+// If not set via ldflags, getVersion() will read from embedded VERSION file.
 var (
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
 )
+
+// getVersion returns the version string, preferring ldflags but falling back to VERSION file.
+func getVersion() string {
+	// If version was set via ldflags and isn't the default, use it
+	if version != "" && version != "dev" {
+		return version
+	}
+	// Fall back to embedded VERSION file
+	if v := strings.TrimSpace(versionFile); v != "" {
+		return v
+	}
+	return "dev"
+}
 
 const (
 	cacheTTL                  = 10 * 24 * time.Hour // 10 days - rely mostly on PR UpdatedAt
@@ -117,6 +137,7 @@ func main() {
 	var targetUser string
 	var noCache bool
 	var debugMode bool
+	var showVersion bool
 	var updateInterval time.Duration
 	var browserOpenDelay time.Duration
 	var maxBrowserOpensMinute int
@@ -124,11 +145,18 @@ func main() {
 	flag.StringVar(&targetUser, "user", "", "GitHub user to query PRs for (defaults to authenticated user)")
 	flag.BoolVar(&noCache, "no-cache", false, "Bypass cache for debugging")
 	flag.BoolVar(&debugMode, "debug", false, "Enable debug logging")
+	flag.BoolVar(&showVersion, "version", false, "Show version information and exit")
 	flag.DurationVar(&updateInterval, "interval", defaultUpdateInterval, "Update interval (e.g. 30s, 1m, 5m)")
 	flag.DurationVar(&browserOpenDelay, "browser-delay", 1*time.Minute, "Minimum delay before opening PRs in browser after startup")
 	flag.IntVar(&maxBrowserOpensMinute, "browser-max-per-minute", 2, "Maximum browser windows to open per minute")
 	flag.IntVar(&maxBrowserOpensDay, "browser-max-per-day", defaultMaxBrowserOpensDay, "Maximum browser windows to open per day")
 	flag.Parse()
+
+	// Handle version flag
+	if showVersion {
+		fmt.Printf("goose version %s\ncommit: %s\nbuilt: %s\n", getVersion(), commit, date)
+		os.Exit(0)
+	}
 
 	// Validate target user if provided
 	if targetUser != "" {
@@ -168,7 +196,7 @@ func main() {
 		Level:     logLevel,
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
-	slog.Info("Starting Goose", "version", version, "commit", commit, "date", date)
+	slog.Info("Starting Goose", "version", getVersion(), "commit", commit, "date", date)
 	slog.Info("Configuration", "update_interval", updateInterval, "max_retries", maxRetries, "max_delay", maxRetryDelay)
 	slog.Info("Browser auto-open configuration",
 		"startup_delay", browserOpenDelay,

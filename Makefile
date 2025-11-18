@@ -5,12 +5,15 @@ BUNDLE_VERSION = 1
 BUNDLE_ID = dev.codegroove.r2r
 
 # Version information for builds
-GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+# Try VERSION file first (for release tarballs), then fall back to git
+VERSION_FILE := $(shell cat cmd/goose/VERSION 2>/dev/null)
+GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
+BUILD_VERSION := $(or $(VERSION_FILE),$(GIT_VERSION),dev)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS := -X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
+LDFLAGS := -X main.version=$(BUILD_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
 
-.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows test
+.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows test release
 
 test:
 	go test -race ./...
@@ -133,6 +136,10 @@ app-bundle: out build-darwin install-appify
 		/usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion en" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :NSUserNotificationAlertStyle string alert" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :NSUserNotificationAlertStyle alert" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
+		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
+		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 
 	# Remove extended attributes and code sign the app bundle
 	@echo "Preparing app bundle for signing..."
@@ -257,3 +264,42 @@ fix:
 	exit $$exit_code
 
 # END: lint-install .
+
+# Release workflow - creates a new version tag
+# Usage: make release VERSION=v1.0.0
+release:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: VERSION is required. Usage: make release VERSION=v1.0.0"; \
+		exit 1; \
+	fi
+	@echo "Creating release $(VERSION)..."
+	@if ! echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then \
+		echo "Error: VERSION must be in format vX.Y.Z or vX.Y.Z-suffix (e.g., v1.0.0, v1.0.0-alpha)"; \
+		exit 1; \
+	fi
+	@if git rev-parse "$(VERSION)" >/dev/null 2>&1; then \
+		echo "Error: Tag $(VERSION) already exists"; \
+		exit 1; \
+	fi
+	@echo "Running tests..."
+	@$(MAKE) test
+	@echo "Running linters..."
+	@$(MAKE) lint
+	@echo "Creating VERSION file..."
+	@echo "$(VERSION)" > cmd/goose/VERSION
+	@git add cmd/goose/VERSION
+	@if [ -n "$$(git diff --cached --name-only)" ]; then \
+		git commit -m "Release $(VERSION)"; \
+	fi
+	@echo "Checking for uncommitted changes..."
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Error: Working directory has uncommitted changes"; \
+		git status --short; \
+		exit 1; \
+	fi
+	@echo "Creating and pushing tag $(VERSION)..."
+	@git tag -a "$(VERSION)" -m "Release $(VERSION)"
+	@git push origin main
+	@git push origin "$(VERSION)"
+	@echo "✓ Release $(VERSION) created and pushed successfully"
+	@echo "  View release at: https://github.com/codeGROOVE-dev/goose/releases/tag/$(VERSION)"

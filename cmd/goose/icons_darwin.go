@@ -24,7 +24,7 @@ var iconWarning []byte
 //go:embed icons/cockroach.png
 var iconCockroach []byte
 
-func getIcon(iconType IconType, counts PRCounts) []byte {
+func getIcon(iconType IconType, _ PRCounts) []byte {
 	switch iconType {
 	case IconGoose, IconBoth:
 		return iconGoose
