@@ -12,44 +12,43 @@ The only PR tracker that honks at you when you're the bottleneck. Now shipping w
 Lives in your menubar like a tiny waterfowl of productivity shame, watching your GitHub PRs and making aggressive bird sounds when you're blocking someone's code from seeing the light of production.
 
 ![Review Goose Screenshot](media/screenshot.png)
+
 ## macOS Quick Start ⚡ (Get Honked At)
 
-Install dependencies:
+Homebrew users can get the party started quickly:
 
-```bash
-brew install gh go
-```
+```shell
 
-Confirm that `gh` is properly authenticated:
-
-```
+brew install --cask codeGROOVE-dev/homebrew-tap/review-goose
 gh auth status || gh auth login
 ```
 
-Build & run:
+Open `/Applications/Review Goose.app`. To be persistently annoyed every time you login, click the `Start at Login` menu item.
 
-```bash
-git clone https://github.com/ready-to-review/goose.git
-cd goose && make run
+## Homebrew on Linux Quick Start ⚡
+
+On a progressive Linux distribution that includes Homebrew, such as [Bluefin](https://projectbluefin.io/)? You are just a cut and paste away from excitement:
+
+```shell
+brew install codeGROOVE-dev/homebrew-tap/review-goose
+gh auth status || gh auth login
 ```
 
-This will will cause the goose to implant itself into `/Applications/Review Goose.app` for future invocations. To be persistently annoyed every time you login, click the `Start at Login` menu item.
+## Linux/BSD/Windows Medium Start
 
-## Linux/BSD/Windows Quick Start
-
-1. Install the GitHub CLI and Go via your platforms recommended methods
-2. Compile and install Goose:
+1. Install the [GitHub CLI](https://cli.github.com/) and [Go](https://go.dev/dl/) via your platforms recommended methods
+2. Install Review Goose:
 
 ```bash
 go install github.com/codeGROOVE-dev/goose/cmd/review-goose@latest
 ```
 
 3. Copy goose from $HOME/go/bin to wherever you prefer
-4. Add goose to your auto-login so you never foget about PRs again
+4. Add goose to your auto-login so you never forget about PRs again
 
 ## Using a fine-grained access token
 
-If you want more control over which repositories the goose can access, you can use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with the following permissions:
+If you want more control over which repositories the goose can access - for example, only access to public repositories, you can use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) with the following permissions:
 
 - **Pull requests**: Read
 - **Metadata**: Read
@@ -57,10 +56,8 @@ If you want more control over which repositories the goose can access, you can u
 You can then use the token like so:
 
 ```bash
-env GITHUB_TOKEN=your_token_here goose
+env GITHUB_TOKEN=your_token_here review-goose
 ```
-
-We don't yet persist fine-grained tokens to disk - PR's welcome!
 
 ## Usage
 

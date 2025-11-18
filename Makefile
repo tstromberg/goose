@@ -331,7 +331,7 @@ release:
 		exit 1; \
 	fi
 	@echo "Creating and pushing tag $(VERSION)..."
-	@git tag -a "$(VERSION)" -m "Release $(VERSION)"
+	@git tag "$(VERSION)"
 	@git push origin main
 	@git push origin "$(VERSION)"
 	@echo "✓ Release $(VERSION) created and pushed successfully"
