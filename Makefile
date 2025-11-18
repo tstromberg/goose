@@ -6,7 +6,7 @@ BUNDLE_ID = dev.codegroove.r2r
 
 # Version information for builds
 # Try VERSION file first (for release tarballs), then fall back to git
-VERSION_FILE := $(shell cat cmd/goose/VERSION 2>/dev/null)
+VERSION_FILE := $(shell cat cmd/review-goose/VERSION 2>/dev/null)
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
 BUILD_VERSION := $(or $(VERSION_FILE),$(GIT_VERSION),dev)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -33,15 +33,15 @@ ifeq ($(shell uname),Darwin)
 	@echo "Running $(BUNDLE_NAME) from /Applications..."
 	@open "/Applications/$(BUNDLE_NAME).app"
 else
-	go run ./cmd/goose
+	go run ./cmd/review-goose
 endif
 
 # Build for current platform
 build: out
 ifeq ($(OS),Windows_NT)
-	CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME).exe ./cmd/goose
+	CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME).exe ./cmd/review-goose
 else
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME) ./cmd/goose
+	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME) ./cmd/review-goose
 endif
 
 # Build for all platforms
@@ -49,18 +49,18 @@ build-all: build-darwin build-linux build-windows
 
 # Build for macOS
 build-darwin:
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 ./cmd/goose
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 ./cmd/goose
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 ./cmd/review-goose
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 ./cmd/review-goose
 
 # Build for Linux
 build-linux:
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 ./cmd/goose
-	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 ./cmd/goose
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 ./cmd/review-goose
+	CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 ./cmd/review-goose
 
 # Build for Windows
 build-windows:
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe ./cmd/goose
-	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe .
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe ./cmd/review-goose
+	CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe ./cmd/review-goose
 
 # Clean build artifacts
 clean:
@@ -286,8 +286,8 @@ release:
 	@echo "Running linters..."
 	@$(MAKE) lint
 	@echo "Creating VERSION file..."
-	@echo "$(VERSION)" > cmd/goose/VERSION
-	@git add cmd/goose/VERSION
+	@echo "$(VERSION)" > cmd/review-goose/VERSION
+	@git add cmd/review-goose/VERSION
 	@if [ -n "$$(git diff --cached --name-only)" ]; then \
 		git commit -m "Release $(VERSION)"; \
 	fi

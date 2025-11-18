@@ -41,7 +41,7 @@ This will will cause the goose to implant itself into `/Applications/Review Goos
 2. Compile and install Goose:
 
 ```bash
-go install github.com/codeGROOVE-dev/goose/cmd/goose@latest
+go install github.com/codeGROOVE-dev/goose/cmd/review-goose@latest
 ```
 
 3. Copy goose from $HOME/go/bin to wherever you prefer

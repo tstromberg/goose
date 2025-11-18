@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codeGROOVE-dev/goose/cmd/goose/x11tray"
+	"github.com/codeGROOVE-dev/goose/cmd/review-goose/x11tray"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray"
