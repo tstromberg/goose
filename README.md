@@ -72,7 +72,7 @@ env GITHUB_TOKEN=your_token_here review-goose
 ## Pricing
 
 - Free forever for public open-source repositories ❤️
-- Private repo access will soon be a supporter-only feature to ensure the goose is fed. ($1/mo)
+- Starting in 2026, private repository access will require sponsorship or [Ready to Review](https://github.com/apps/ready-to-review-beta) subscription ($2/mo)
 
 ## Privacy
 
