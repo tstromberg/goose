@@ -10,7 +10,7 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -X main.version=$(GIT_VERSION) -X main.commit=$(GIT_COMMIT) -X main.date=$(BUILD_DATE)
 
-.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows test
+.PHONY: all build clean deps run app-bundle install install-darwin install-unix install-windows test release
 
 test:
 	go test -race ./...
@@ -257,3 +257,35 @@ fix:
 	exit $$exit_code
 
 # END: lint-install .
+
+# Release workflow - creates a new version tag
+# Usage: make release VERSION=v1.0.0
+release:
+	@if [ -z "$(VERSION)" ]; then \
+		echo "Error: VERSION is required. Usage: make release VERSION=v1.0.0"; \
+		exit 1; \
+	fi
+	@echo "Creating release $(VERSION)..."
+	@if ! echo "$(VERSION)" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "Error: VERSION must be in format vX.Y.Z (e.g., v1.0.0)"; \
+		exit 1; \
+	fi
+	@if git rev-parse "$(VERSION)" >/dev/null 2>&1; then \
+		echo "Error: Tag $(VERSION) already exists"; \
+		exit 1; \
+	fi
+	@echo "Running tests..."
+	@$(MAKE) test
+	@echo "Running linters..."
+	@$(MAKE) lint
+	@echo "Checking for uncommitted changes..."
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "Error: Working directory has uncommitted changes"; \
+		git status --short; \
+		exit 1; \
+	fi
+	@echo "Creating and pushing tag $(VERSION)..."
+	@git tag -a "$(VERSION)" -m "Release $(VERSION)"
+	@git push origin "$(VERSION)"
+	@echo "✓ Release $(VERSION) created and pushed successfully"
+	@echo "  View release at: https://github.com/codeGROOVE-dev/goose/releases/tag/$(VERSION)"

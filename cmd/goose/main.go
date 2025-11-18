@@ -117,6 +117,7 @@ func main() {
 	var targetUser string
 	var noCache bool
 	var debugMode bool
+	var showVersion bool
 	var updateInterval time.Duration
 	var browserOpenDelay time.Duration
 	var maxBrowserOpensMinute int
@@ -124,11 +125,18 @@ func main() {
 	flag.StringVar(&targetUser, "user", "", "GitHub user to query PRs for (defaults to authenticated user)")
 	flag.BoolVar(&noCache, "no-cache", false, "Bypass cache for debugging")
 	flag.BoolVar(&debugMode, "debug", false, "Enable debug logging")
+	flag.BoolVar(&showVersion, "version", false, "Show version information and exit")
 	flag.DurationVar(&updateInterval, "interval", defaultUpdateInterval, "Update interval (e.g. 30s, 1m, 5m)")
 	flag.DurationVar(&browserOpenDelay, "browser-delay", 1*time.Minute, "Minimum delay before opening PRs in browser after startup")
 	flag.IntVar(&maxBrowserOpensMinute, "browser-max-per-minute", 2, "Maximum browser windows to open per minute")
 	flag.IntVar(&maxBrowserOpensDay, "browser-max-per-day", defaultMaxBrowserOpensDay, "Maximum browser windows to open per day")
 	flag.Parse()
+
+	// Handle version flag
+	if showVersion {
+		fmt.Printf("goose version %s\ncommit: %s\nbuilt: %s\n", version, commit, date)
+		os.Exit(0)
+	}
 
 	// Validate target user if provided
 	if targetUser != "" {
