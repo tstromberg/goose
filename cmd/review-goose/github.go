@@ -610,6 +610,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 						continue
 					}
 					(*incoming)[i].NeedsReview = needsReview
+					(*incoming)[i].IsBlocked = isBlocked
 					(*incoming)[i].ActionReason = actionReason
 					(*incoming)[i].ActionKind = actionKind
 					(*incoming)[i].TestState = testState
