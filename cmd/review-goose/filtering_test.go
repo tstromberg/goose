@@ -158,3 +158,66 @@ func TestExtractOrgFromRepo(t *testing.T) {
 		})
 	}
 }
+
+// TestIsAlreadyTrackedAsBlocked tests that sprinkler correctly identifies blocked PRs
+func TestIsAlreadyTrackedAsBlocked(t *testing.T) {
+	app := &App{
+		incoming: []PR{
+			{URL: "https://github.com/org1/repo1/pull/1", IsBlocked: true},
+			{URL: "https://github.com/org1/repo1/pull/2", IsBlocked: false},
+			{URL: "https://github.com/org1/repo1/pull/3", NeedsReview: true, IsBlocked: false}, // NeedsReview but not IsBlocked
+		},
+		outgoing: []PR{
+			{URL: "https://github.com/org2/repo2/pull/10", IsBlocked: true},
+			{URL: "https://github.com/org2/repo2/pull/11", IsBlocked: false},
+		},
+	}
+
+	sm := &sprinklerMonitor{app: app}
+
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{
+			name: "incoming PR is blocked",
+			url:  "https://github.com/org1/repo1/pull/1",
+			want: true,
+		},
+		{
+			name: "incoming PR is not blocked",
+			url:  "https://github.com/org1/repo1/pull/2",
+			want: false,
+		},
+		{
+			name: "incoming PR needs review but is not blocked",
+			url:  "https://github.com/org1/repo1/pull/3",
+			want: false,
+		},
+		{
+			name: "outgoing PR is blocked",
+			url:  "https://github.com/org2/repo2/pull/10",
+			want: true,
+		},
+		{
+			name: "outgoing PR is not blocked",
+			url:  "https://github.com/org2/repo2/pull/11",
+			want: false,
+		},
+		{
+			name: "unknown PR",
+			url:  "https://github.com/org3/repo3/pull/99",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sm.isAlreadyTrackedAsBlocked(tt.url, "test", 1)
+			if got != tt.want {
+				t.Errorf("isAlreadyTrackedAsBlocked(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
