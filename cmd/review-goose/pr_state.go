@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 )
@@ -180,9 +181,7 @@ func (m *PRStateManager) BlockedPRs() map[string]*PRState {
 	defer m.mu.RUnlock()
 
 	result := make(map[string]*PRState)
-	for url, state := range m.states {
-		result[url] = state
-	}
+	maps.Copy(result, m.states)
 	return result
 }
 
