@@ -591,6 +591,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			}
 
 			// Update the PR in the slices directly
+			authorBot := result.turnData.PullRequest.AuthorBot
 			if result.isOwner {
 				for i := range *outgoing {
 					if (*outgoing)[i].URL != result.url {
@@ -602,6 +603,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 					(*outgoing)[i].ActionKind = actionKind
 					(*outgoing)[i].TestState = testState
 					(*outgoing)[i].WorkflowState = workflowState
+					(*outgoing)[i].AuthorBot = authorBot
 					break
 				}
 			} else {
@@ -615,6 +617,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 					(*incoming)[i].ActionKind = actionKind
 					(*incoming)[i].TestState = testState
 					(*incoming)[i].WorkflowState = workflowState
+					(*incoming)[i].AuthorBot = authorBot
 					break
 				}
 			}

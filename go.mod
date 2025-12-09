@@ -10,8 +10,8 @@ require (
 	github.com/gen2brain/beeep v0.11.1
 	github.com/godbus/dbus/v5 v5.2.0
 	github.com/google/go-github/v57 v57.0.0
-	golang.org/x/image v0.33.0
-	golang.org/x/oauth2 v0.33.0
+	golang.org/x/image v0.34.0
+	golang.org/x/oauth2 v0.34.0
 )
 
 require (
@@ -26,7 +26,7 @@ require (
 	github.com/sergeymakinen/go-ico v1.0.0 // indirect
 	github.com/tadvi/systray v0.0.0-20190226123456-11a2b8fa57af // indirect
 	github.com/tevino/abool v0.0.0-20220530134649-2bfc934cb23c // indirect
-	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/net v0.48.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 )
