@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"runtime"
 	"sort"
 	"strconv"
@@ -259,9 +260,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	// Get hidden orgs with proper locking
 	app.mu.RLock()
 	hiddenOrgs := make(map[string]bool)
-	for org, hidden := range app.hiddenOrgs {
-		hiddenOrgs[org] = hidden
-	}
+	maps.Copy(hiddenOrgs, app.hiddenOrgs)
 	hideStale := app.hideStaleIncoming
 	app.mu.RUnlock()
 
@@ -444,9 +443,7 @@ func (app *App) generateMenuTitles() []string {
 	outgoing := make([]PR, len(app.outgoing))
 	copy(outgoing, app.outgoing)
 	hiddenOrgs := make(map[string]bool)
-	for org, hidden := range app.hiddenOrgs {
-		hiddenOrgs[org] = hidden
-	}
+	maps.Copy(hiddenOrgs, app.hiddenOrgs)
 	hideStale := app.hideStaleIncoming
 	app.mu.RUnlock()
 
@@ -813,9 +810,7 @@ func (app *App) addStaticMenuItems(ctx context.Context) {
 		orgs = append(orgs, org)
 	}
 	hiddenOrgs := make(map[string]bool)
-	for org, hidden := range app.hiddenOrgs {
-		hiddenOrgs[org] = hidden
-	}
+	maps.Copy(hiddenOrgs, app.hiddenOrgs)
 	app.mu.RUnlock()
 
 	sort.Strings(orgs)

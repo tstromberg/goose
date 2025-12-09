@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"time"
 
 	"github.com/gen2brain/beeep"
@@ -16,9 +17,7 @@ func (app *App) processNotifications(ctx context.Context) {
 	// Get the list of PRs that need notifications
 	app.mu.RLock()
 	hiddenOrgs := make(map[string]bool)
-	for org, hidden := range app.hiddenOrgs {
-		hiddenOrgs[org] = hidden
-	}
+	maps.Copy(hiddenOrgs, app.hiddenOrgs)
 	incoming := make([]PR, len(app.incoming))
 	copy(incoming, app.incoming)
 	outgoing := make([]PR, len(app.outgoing))

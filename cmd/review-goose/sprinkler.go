@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -202,13 +203,7 @@ func (sm *sprinklerMonitor) handleEvent(event client.Event) {
 
 	// Check if this org is in our monitored list
 	sm.mu.RLock()
-	monitored := false
-	for _, o := range sm.orgs {
-		if o == org {
-			monitored = true
-			break
-		}
-	}
+	monitored := slices.Contains(sm.orgs, org)
 	orgCount := len(sm.orgs)
 	sm.mu.RUnlock()
 
