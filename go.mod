@@ -8,7 +8,7 @@ require (
 	github.com/codeGROOVE-dev/turnclient v0.0.0-20251107215141-ee43672b3dc7
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
-	github.com/godbus/dbus/v5 v5.1.0
+	github.com/godbus/dbus/v5 v5.2.0
 	github.com/google/go-github/v57 v57.0.0
 	golang.org/x/image v0.33.0
 	golang.org/x/oauth2 v0.33.0
