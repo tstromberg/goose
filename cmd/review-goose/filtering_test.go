@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -219,5 +220,92 @@ func TestIsAlreadyTrackedAsBlocked(t *testing.T) {
 				t.Errorf("isAlreadyTrackedAsBlocked(%q) = %v, want %v", tt.url, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestBotPRsSortedAfterHumans tests that human-authored PRs appear before bot-authored PRs
+func TestBotPRsSortedAfterHumans(t *testing.T) {
+	now := time.Now()
+
+	app := &App{
+		incoming: []PR{
+			{Repository: "org/repo1", Number: 1, Author: "dependabot[bot]", AuthorBot: true, NeedsReview: true, UpdatedAt: now},
+			{Repository: "org/repo2", Number: 2, Author: "human-dev", AuthorBot: false, NeedsReview: true, UpdatedAt: now.Add(-1 * time.Hour)},
+			{Repository: "org/repo3", Number: 3, Author: "renovate[bot]", AuthorBot: true, NeedsReview: true, UpdatedAt: now.Add(-2 * time.Hour)},
+			{Repository: "org/repo4", Number: 4, Author: "another-human", AuthorBot: false, NeedsReview: true, UpdatedAt: now.Add(-3 * time.Hour)},
+		},
+		hiddenOrgs:       map[string]bool{},
+		stateManager:     NewPRStateManager(now),
+		systrayInterface: &MockSystray{},
+	}
+
+	titles := app.generatePRSectionTitles(app.incoming, "Incoming", map[string]bool{}, false)
+
+	if len(titles) != 4 {
+		t.Fatalf("Expected 4 titles, got %d", len(titles))
+	}
+
+	// Human PRs should come first (repo2 and repo4), then bot PRs (repo1 and repo3)
+	// Within each group, sorted by UpdatedAt (most recent first)
+	expectedOrder := []string{"repo2", "repo4", "repo1", "repo3"}
+	for i, expected := range expectedOrder {
+		if !strings.Contains(titles[i], expected) {
+			t.Errorf("Title %d: expected to contain %q, got %q", i, expected, titles[i])
+		}
+	}
+}
+
+// TestBotPRsGetSmallerIcon tests that bot PRs get a smaller dot icon instead of the block
+func TestBotPRsGetSmallerIcon(t *testing.T) {
+	now := time.Now()
+
+	app := &App{
+		incoming: []PR{
+			{
+				Repository:  "org/repo1",
+				Number:      1,
+				Author:      "dependabot[bot]",
+				AuthorBot:   true,
+				NeedsReview: true,
+				IsBlocked:   true,
+				UpdatedAt:   now,
+			},
+			{
+				Repository:  "org/repo2",
+				Number:      2,
+				Author:      "human-dev",
+				AuthorBot:   false,
+				NeedsReview: true,
+				IsBlocked:   true,
+				UpdatedAt:   now,
+			},
+		},
+		hiddenOrgs:       map[string]bool{},
+		stateManager:     NewPRStateManager(now),
+		systrayInterface: &MockSystray{},
+	}
+
+	titles := app.generatePRSectionTitles(app.incoming, "Incoming", map[string]bool{}, false)
+
+	if len(titles) != 2 {
+		t.Fatalf("Expected 2 titles, got %d", len(titles))
+	}
+
+	// Human PR should come first with block icon
+	humanTitle := titles[0]
+	if !strings.Contains(humanTitle, "repo2") {
+		t.Errorf("Expected human PR (repo2) first, got: %s", humanTitle)
+	}
+	if !strings.HasPrefix(humanTitle, "■") {
+		t.Errorf("Expected human PR to have block icon (■), got: %s", humanTitle)
+	}
+
+	// Bot PR should come second with smaller dot
+	botTitle := titles[1]
+	if !strings.Contains(botTitle, "repo1") {
+		t.Errorf("Expected bot PR (repo1) second, got: %s", botTitle)
+	}
+	if !strings.HasPrefix(botTitle, "·") {
+		t.Errorf("Expected bot PR to have smaller dot (·), got: %s", botTitle)
 	}
 }

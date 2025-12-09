@@ -220,7 +220,7 @@ func (app *App) setTrayTitle() {
 
 // addPRSection adds a section of PRs to the menu.
 //
-//nolint:maintidx // Function complexity is inherent to PR menu building logic
+//nolint:maintidx,gocognit // Function complexity is inherent to PR menu building logic
 func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string, blockedCount int) {
 	slog.Debug("[MENU] addPRSection called",
 		"section", sectionTitle,
@@ -237,7 +237,7 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 	header := app.systrayInterface.AddMenuItem(headerText, "")
 	header.Disable()
 
-	// Sort PRs with blocked ones first - inline for simplicity
+	// Sort PRs with blocked ones first, humans before bots - inline for simplicity
 	sortedPRs := make([]PR, len(prs))
 	copy(sortedPRs, prs)
 	sort.SliceStable(sortedPRs, func(i, j int) bool {
@@ -248,7 +248,11 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		if sortedPRs[i].IsBlocked != sortedPRs[j].IsBlocked {
 			return sortedPRs[i].IsBlocked // true (blocked) comes before false
 		}
-		// Second priority: more recent PRs first
+		// Second priority: human PRs before bot PRs
+		if sortedPRs[i].AuthorBot != sortedPRs[j].AuthorBot {
+			return !sortedPRs[i].AuthorBot // false (human) comes before true (bot)
+		}
+		// Third priority: more recent PRs first
 		return sortedPRs[i].UpdatedAt.After(sortedPRs[j].UpdatedAt)
 	})
 
@@ -342,8 +346,12 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 						"remaining", blockedPRIconDuration-timeSinceBlocked)
 				}
 			} else {
-				// Use block/square icon for blocked PRs
-				title = fmt.Sprintf("■ %s", title)
+				// Use smaller dot for bot PRs, block icon for humans
+				if sortedPRs[prIndex].AuthorBot {
+					title = fmt.Sprintf("· %s", title)
+				} else {
+					title = fmt.Sprintf("■ %s", title)
+				}
 				// Log when we transition from emoji to block icon
 				if hasState && !prState.FirstBlockedAt.IsZero() {
 					timeSinceBlocked := time.Since(prState.FirstBlockedAt)
@@ -478,10 +486,13 @@ func (app *App) generateMenuTitles() []string {
 func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrgs map[string]bool, hideStale bool) []string {
 	var titles []string
 
-	// Sort PRs by UpdatedAt (most recent first)
+	// Sort PRs: humans before bots, then by UpdatedAt (most recent first)
 	sortedPRs := make([]PR, len(prs))
 	copy(sortedPRs, prs)
 	sort.Slice(sortedPRs, func(i, j int) bool {
+		if sortedPRs[i].AuthorBot != sortedPRs[j].AuthorBot {
+			return !sortedPRs[i].AuthorBot // false (human) comes before true (bot)
+		}
 		return sortedPRs[i].UpdatedAt.After(sortedPRs[j].UpdatedAt)
 	})
 
@@ -546,8 +557,12 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 						"remaining", blockedPRIconDuration-timeSinceBlocked)
 				}
 			} else {
-				// Use block/square icon for blocked PRs
-				title = fmt.Sprintf("■ %s", title)
+				// Use smaller dot for bot PRs, block icon for humans
+				if sortedPRs[prIndex].AuthorBot {
+					title = fmt.Sprintf("· %s", title)
+				} else {
+					title = fmt.Sprintf("■ %s", title)
+				}
 				// Log when we use block icon instead of emoji
 				if hasState && !prState.FirstBlockedAt.IsZero() {
 					timeSinceBlocked := time.Since(prState.FirstBlockedAt)

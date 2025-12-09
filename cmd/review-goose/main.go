@@ -90,6 +90,7 @@ type PR struct {
 	IsDraft           bool
 	IsBlocked         bool
 	NeedsReview       bool
+	AuthorBot         bool // True if the author is a bot (dependabot, renovate, etc.)
 }
 
 // App holds the application state.
