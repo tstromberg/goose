@@ -1,11 +1,11 @@
 module github.com/codeGROOVE-dev/goose
 
-go 1.24.0
+go 1.25.4
 
 require (
 	github.com/codeGROOVE-dev/retry v1.3.0
 	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251113030909-5962af625370
-	github.com/codeGROOVE-dev/turnclient v0.0.0-20251107215141-ee43672b3dc7
+	github.com/codeGROOVE-dev/turnclient v0.0.0-20251210023051-bbb7e1943ebd
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
 	github.com/godbus/dbus/v5 v5.2.0
@@ -16,7 +16,9 @@ require (
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast v1.1.2 // indirect
-	github.com/codeGROOVE-dev/prx v0.0.0-20251109164430-90488144076d // indirect
+	github.com/codeGROOVE-dev/prx v0.0.0-20251210004018-f65fe8849ded // indirect
+	github.com/codeGROOVE-dev/sfcache v1.4.2 // indirect
+	github.com/codeGROOVE-dev/sfcache/pkg/store/localfs v1.4.2 // indirect
 	github.com/esiqveland/notify v0.13.3 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
