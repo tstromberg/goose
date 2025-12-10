@@ -5,7 +5,7 @@ go 1.25.4
 require (
 	github.com/codeGROOVE-dev/retry v1.3.0
 	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251113030909-5962af625370
-	github.com/codeGROOVE-dev/turnclient v0.0.0-20251107215141-ee43672b3dc7
+	github.com/codeGROOVE-dev/turnclient v0.0.0-20251210023051-bbb7e1943ebd
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.1
 	github.com/godbus/dbus/v5 v5.2.0

@@ -10,8 +10,8 @@ github.com/codeGROOVE-dev/sfcache/pkg/store/localfs v1.4.2 h1:EF0RxIee8DvugvTmwi
 github.com/codeGROOVE-dev/sfcache/pkg/store/localfs v1.4.2/go.mod h1:D/Y1sYT1m3VXHZRkQjHjFwtKQOsb587QZP/GtfJEDSE=
 github.com/codeGROOVE-dev/sprinkler v0.0.0-20251113030909-5962af625370 h1:uYXBDnaRRf4q6X/IWOm6O/cOj57tVkpjfVvwn+SfHp0=
 github.com/codeGROOVE-dev/sprinkler v0.0.0-20251113030909-5962af625370/go.mod h1:sOvKRad1kRPAOIUm7spNR3aeVQjtk9VoS8uo6NL4kus=
-github.com/codeGROOVE-dev/turnclient v0.0.0-20251107215141-ee43672b3dc7 h1:183q0bj2y/9hh/K0HZvDXI6sG7liYSRcQVgFx0GY+UA=
-github.com/codeGROOVE-dev/turnclient v0.0.0-20251107215141-ee43672b3dc7/go.mod h1:dVS3MlJDgL6WkfurJAyS7I9Fe1yxxoxxarjVifY5bIo=
+github.com/codeGROOVE-dev/turnclient v0.0.0-20251210023051-bbb7e1943ebd h1:Baps/A2EaaMlZlTseAO9/ig0oWFmqUGLtNRJm9bEDXA=
+github.com/codeGROOVE-dev/turnclient v0.0.0-20251210023051-bbb7e1943ebd/go.mod h1:B2rJBMHZ+rI7v629vSF2rYb669OUY+/5tGeWdUSI65A=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
