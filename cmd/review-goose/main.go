@@ -70,6 +70,7 @@ const (
 	maxConcurrentTurnAPICalls = 20
 	defaultMaxBrowserOpensDay = 20
 	startupGracePeriod        = 1 * time.Minute // Don't play sounds or auto-open for first minute
+	authRetryInterval         = 2 * time.Minute // Retry authentication periodically when in error state
 )
 
 // PR represents a pull request with metadata.
@@ -420,6 +421,46 @@ func (app *App) handleReauthentication(ctx context.Context) {
 	}
 }
 
+// authRetryLoop periodically attempts to re-authenticate when in auth error state.
+// This ensures the app can recover from transient auth failures without user intervention.
+func (app *App) authRetryLoop(ctx context.Context) {
+	ticker := time.NewTicker(authRetryInterval)
+	defer ticker.Stop()
+
+	slog.Info("[AUTH] Starting auth retry loop", "interval", authRetryInterval)
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("[AUTH] Auth retry loop stopped (context cancelled)")
+			return
+		case <-ticker.C:
+			app.mu.RLock()
+			hasAuthError := app.authError != ""
+			app.mu.RUnlock()
+
+			if !hasAuthError {
+				slog.Info("[AUTH] Auth error cleared, stopping retry loop")
+				return
+			}
+
+			slog.Info("[AUTH] Attempting automatic re-authentication")
+			app.handleReauthentication(ctx)
+
+			// Check if we recovered
+			app.mu.RLock()
+			stillHasError := app.authError != ""
+			app.mu.RUnlock()
+
+			if !stillHasError {
+				slog.Info("[AUTH] Automatic re-authentication successful, stopping retry loop")
+				return
+			}
+			slog.Info("[AUTH] Re-authentication failed, will retry", "nextRetry", authRetryInterval)
+		}
+	}
+}
+
 func (app *App) onReady(ctx context.Context) {
 	slog.Info("System tray ready")
 
@@ -501,6 +542,8 @@ func (app *App) onReady(ctx context.Context) {
 		app.rebuildMenu(ctx)
 		// Clean old cache on startup
 		app.cleanupOldCache()
+		// Start background auth retry loop
+		go app.authRetryLoop(ctx)
 		return
 	}
 

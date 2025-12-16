@@ -527,10 +527,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 			continue
 		}
 
-		wg.Add(1)
-		go func(issue *github.Issue) {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// Acquire semaphore
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -548,7 +545,7 @@ func (app *App) fetchTurnDataSync(ctx context.Context, issues []*github.Issue, u
 				isOwner:      issue.GetUser().GetLogin() == user,
 				wasFromCache: wasFromCache,
 			}
-		}(issue)
+		})
 	}
 
 	// Close the results channel when all goroutines are done
