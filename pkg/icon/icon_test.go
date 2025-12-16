@@ -58,14 +58,14 @@ func TestCache(t *testing.T) {
 	c := NewCache()
 
 	// Cache miss
-	if _, ok := c.Get(1, 2); ok {
+	if _, ok := c.Lookup(1, 2); ok {
 		t.Error("expected cache miss")
 	}
 
 	// Cache hit
 	data := []byte("test")
 	c.Put(1, 2, data)
-	got, ok := c.Get(1, 2)
+	got, ok := c.Lookup(1, 2)
 	if !ok {
 		t.Error("expected cache hit")
 	}

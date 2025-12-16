@@ -764,7 +764,7 @@ func (app *App) updatePRs(ctx context.Context) {
 
 	// Process notifications using the simplified state manager
 	slog.Debug("[DEBUG] Processing PR state updates and notifications")
-	app.updatePRStatesAndNotify(ctx)
+	app.processNotifications(ctx)
 	slog.Debug("[DEBUG] Completed PR state updates and notifications")
 }
 
@@ -927,7 +927,7 @@ func (app *App) updatePRsWithWait(ctx context.Context) {
 
 	// Process notifications using the simplified state manager
 	slog.Info("[FLOW] About to process PR state updates and notifications")
-	app.updatePRStatesAndNotify(ctx)
+	app.processNotifications(ctx)
 	slog.Info("[FLOW] Completed PR state updates and notifications")
 	// Mark initial load as complete after first successful update
 	if !app.initialLoadComplete {
@@ -998,9 +998,7 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr *PR, autoBrowserEnabled bo
 	}
 }
 
-// checkForNewlyBlockedPRs provides backward compatibility for tests
-// while using the new state manager internally.
+// checkForNewlyBlockedPRs provides backward compatibility for tests.
 func (app *App) checkForNewlyBlockedPRs(ctx context.Context) {
-	// Simply delegate to the new implementation
-	app.updatePRStatesAndNotify(ctx)
+	app.processNotifications(ctx)
 }

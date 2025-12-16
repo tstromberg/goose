@@ -282,7 +282,14 @@ func (sm *sprinklerMonitor) processEvents(ctx context.Context) {
 func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, evt prEvent) {
 	start := time.Now()
 
-	user := sm.currentUser()
+	// Determine user: targetUser takes precedence over currentUser
+	user := ""
+	if sm.app.currentUser != nil {
+		user = sm.app.currentUser.GetLogin()
+	}
+	if sm.app.targetUser != "" {
+		user = sm.app.targetUser
+	}
 	if user == "" {
 		slog.Debug("[SPRINKLER] Skipping check - no user configured", "url", evt.url)
 		return
@@ -325,18 +332,6 @@ func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, evt prEvent) {
 		"elapsed", time.Since(start).Round(time.Millisecond))
 
 	sm.sendNotifications(ctx, evt.url, repo, n, act)
-}
-
-// currentUser returns the configured user for the sprinkler monitor.
-func (sm *sprinklerMonitor) currentUser() string {
-	user := ""
-	if sm.app.currentUser != nil {
-		user = sm.app.currentUser.GetLogin()
-	}
-	if sm.app.targetUser != "" {
-		user = sm.app.targetUser
-	}
-	return user
 }
 
 // fetchTurnData retrieves PR data from Turn API with retry logic.
