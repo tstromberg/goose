@@ -116,9 +116,3 @@ func (app *App) sendPRNotification(ctx context.Context, pr *PR, title string, so
 		*playedSound = true
 	}
 }
-
-// updatePRStatesAndNotify is the simplified replacement for checkForNewlyBlockedPRs.
-func (app *App) updatePRStatesAndNotify(ctx context.Context) {
-	// Simple and clear: just process notifications
-	app.processNotifications(ctx)
-}

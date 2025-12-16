@@ -55,7 +55,7 @@ func getIcon(iconType IconType, counts PRCounts) []byte {
 	}
 
 	// Check cache
-	if cached, ok := cache.Get(incoming, outgoing); ok {
+	if cached, ok := cache.Lookup(incoming, outgoing); ok {
 		return cached
 	}
 

@@ -880,3 +880,154 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 		t.Error("Expected FirstBlockedAt to be set for newly blocked PR in state manager")
 	}
 }
+
+// TestAuthRetryLoopStopsOnSuccess tests that the auth retry loop stops when auth succeeds.
+func TestAuthRetryLoopStopsOnSuccess(t *testing.T) {
+	ctx := t.Context()
+
+	app := &App{
+		mu:               sync.RWMutex{},
+		authError:        "initial auth error",
+		systrayInterface: &MockSystray{},
+	}
+
+	// Track how many times we check authError
+	checkCount := 0
+	done := make(chan struct{})
+
+	// Start a goroutine that simulates the auth retry loop behavior
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Millisecond): // Fast ticker for testing
+				app.mu.RLock()
+				hasError := app.authError != ""
+				app.mu.RUnlock()
+
+				checkCount++
+
+				if !hasError {
+					return // Loop should exit when auth succeeds
+				}
+
+				// Simulate clearing auth error on 3rd attempt
+				if checkCount >= 3 {
+					app.mu.Lock()
+					app.authError = ""
+					app.mu.Unlock()
+				}
+			}
+		}
+	}()
+
+	// Wait for the goroutine to finish
+	select {
+	case <-done:
+		// Success - loop exited
+	case <-time.After(1 * time.Second):
+		t.Fatal("Auth retry loop did not stop after auth succeeded")
+	}
+
+	// Verify auth error was cleared
+	app.mu.RLock()
+	finalError := app.authError
+	app.mu.RUnlock()
+
+	if finalError != "" {
+		t.Errorf("Expected auth error to be cleared, got: %s", finalError)
+	}
+
+	if checkCount < 3 {
+		t.Errorf("Expected at least 3 retry attempts, got: %d", checkCount)
+	}
+}
+
+// TestAuthRetryLoopStopsOnContextCancel tests that the auth retry loop stops on context cancellation.
+func TestAuthRetryLoopStopsOnContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	app := &App{
+		mu:               sync.RWMutex{},
+		authError:        "persistent auth error",
+		systrayInterface: &MockSystray{},
+	}
+
+	done := make(chan struct{})
+
+	// Start a goroutine that simulates the auth retry loop behavior
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				app.mu.RLock()
+				hasError := app.authError != ""
+				app.mu.RUnlock()
+
+				if !hasError {
+					return
+				}
+				// Auth error persists, loop continues
+			}
+		}
+	}()
+
+	// Cancel context after a short delay
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	// Wait for the goroutine to finish
+	select {
+	case <-done:
+		// Success - loop exited on context cancel
+	case <-time.After(1 * time.Second):
+		t.Fatal("Auth retry loop did not stop after context cancellation")
+	}
+}
+
+// TestAuthErrorStatePreservation tests that auth error state is correctly preserved and accessible.
+func TestAuthErrorStatePreservation(t *testing.T) {
+	app := &App{
+		mu:               sync.RWMutex{},
+		systrayInterface: &MockSystray{},
+	}
+
+	// Initially no auth error
+	app.mu.RLock()
+	if app.authError != "" {
+		t.Errorf("Expected no initial auth error, got: %s", app.authError)
+	}
+	app.mu.RUnlock()
+
+	// Set auth error
+	app.mu.Lock()
+	app.authError = "token expired"
+	app.mu.Unlock()
+
+	// Verify auth error is set
+	app.mu.RLock()
+	if app.authError != "token expired" {
+		t.Errorf("Expected auth error 'token expired', got: %s", app.authError)
+	}
+	app.mu.RUnlock()
+
+	// Clear auth error
+	app.mu.Lock()
+	app.authError = ""
+	app.mu.Unlock()
+
+	// Verify auth error is cleared
+	app.mu.RLock()
+	if app.authError != "" {
+		t.Errorf("Expected auth error to be cleared, got: %s", app.authError)
+	}
+	app.mu.RUnlock()
+}

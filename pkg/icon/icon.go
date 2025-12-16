@@ -206,11 +206,11 @@ func NewCache() *Cache {
 	return &Cache{icons: make(map[string][]byte)}
 }
 
-// Get retrieves a cached icon.
-func (c *Cache) Get(incoming, outgoing int) ([]byte, bool) {
+// Lookup retrieves a cached icon or returns false if not found.
+func (c *Cache) Lookup(in, out int) ([]byte, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	data, ok := c.icons[key(incoming, outgoing)]
+	data, ok := c.icons[key(in, out)]
 	return data, ok
 }
 
