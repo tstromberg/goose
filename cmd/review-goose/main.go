@@ -71,6 +71,7 @@ const (
 	defaultMaxBrowserOpensDay = 20
 	startupGracePeriod        = 1 * time.Minute // Don't play sounds or auto-open for first minute
 	authRetryInterval         = 2 * time.Minute // Retry authentication periodically when in error state
+	ancientPRThreshold        = 24 * time.Hour  // Refuse to notify for PRs with no activity in this long (safety check)
 )
 
 // PR represents a pull request with metadata.
@@ -79,6 +80,7 @@ type PR struct {
 	CreatedAt         time.Time
 	TurnDataAppliedAt time.Time
 	FirstBlockedAt    time.Time // When this PR was first detected as blocked
+	LastActivityAt    time.Time // Most recent activity timestamp from Turn API (includes test completions)
 	Title             string
 	URL               string
 	Repository        string
