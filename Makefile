@@ -151,7 +151,7 @@ define create-app-bundle
 	fi
 
 	@echo "Fixing Info.plist..."
-	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable Review\\ Goose" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $(BUNDLE_NAME)" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :LSUIElement true" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string en" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
