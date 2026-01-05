@@ -40,6 +40,7 @@ type sprinklerMonitor struct {
 	eventChan       chan prEvent
 	lastEventMap    map[string]time.Time
 	token           string
+	serverAddress   string // Custom server hostname (empty = use default)
 	orgs            []string
 	mu              sync.RWMutex
 	isRunning       bool
@@ -47,13 +48,15 @@ type sprinklerMonitor struct {
 }
 
 // newSprinklerMonitor creates a new sprinkler monitor for real-time PR events.
-func newSprinklerMonitor(app *App, token string) *sprinklerMonitor {
+// If sprinklerServer is non-empty, it will be used as the WebSocket server hostname.
+func newSprinklerMonitor(app *App, token, sprinklerServer string) *sprinklerMonitor {
 	return &sprinklerMonitor{
-		app:          app,
-		token:        token,
-		orgs:         make([]string, 0),
-		eventChan:    make(chan prEvent, eventChannelSize),
-		lastEventMap: make(map[string]time.Time),
+		app:           app,
+		token:         token,
+		serverAddress: sprinklerServer,
+		orgs:          make([]string, 0),
+		eventChan:     make(chan prEvent, eventChannelSize),
+		lastEventMap:  make(map[string]time.Time),
 	}
 }
 
@@ -106,8 +109,14 @@ func (sm *sprinklerMonitor) start(ctx context.Context) error {
 		}))
 	}
 
+	// Use custom server address if configured, otherwise default
+	serverAddr := client.DefaultServerAddress
+	if sm.serverAddress != "" {
+		serverAddr = sm.serverAddress
+	}
+
 	config := client.Config{
-		ServerURL:      "wss://" + client.DefaultServerAddress + "/ws",
+		ServerURL:      "wss://" + serverAddr + "/ws",
 		Token:          sm.token,
 		Organization:   "*", // Monitor all orgs
 		EventTypes:     []string{"pull_request"},
@@ -441,14 +450,24 @@ func validateUserAction(data *turn.CheckResponse, user, repo string, n int, cach
 // handleNewPR triggers a refresh for PRs not in our lists and returns true if handled.
 func (sm *sprinklerMonitor) handleNewPR(ctx context.Context, url, repo string, n int, act *turn.Action) bool {
 	sm.app.mu.RLock()
-	inIncoming := findPRInList(sm.app.incoming, url)
-	inOutgoing := false
-	if !inIncoming {
-		inOutgoing = findPRInList(sm.app.outgoing, url)
+	found := false
+	for i := range sm.app.incoming {
+		if sm.app.incoming[i].URL == url {
+			found = true
+			break
+		}
+	}
+	if !found {
+		for i := range sm.app.outgoing {
+			if sm.app.outgoing[i].URL == url {
+				found = true
+				break
+			}
+		}
 	}
 	sm.app.mu.RUnlock()
 
-	if !inIncoming && !inOutgoing {
+	if !found {
 		slog.Info("[SPRINKLER] New PR detected, triggering refresh",
 			"repo", repo,
 			"number", n,
@@ -457,16 +476,6 @@ func (sm *sprinklerMonitor) handleNewPR(ctx context.Context, url, repo string, n
 		return true
 	}
 
-	return false
-}
-
-// findPRInList searches for a PR URL in the given list.
-func findPRInList(prs []PR, url string) bool {
-	for i := range prs {
-		if prs[i].URL == url {
-			return true
-		}
-	}
 	return false
 }
 

@@ -59,7 +59,7 @@ const (
 	runningTestsCacheBypass   = 90 * time.Minute // Don't cache PRs with running tests if fresher than this
 	maxPRsToProcess           = 200
 	minUpdateInterval         = 10 * time.Second
-	defaultUpdateInterval     = 1 * time.Minute
+	defaultUpdateInterval     = 2 * time.Minute
 	blockedPRIconDuration     = 5 * time.Minute
 	maxRetryDelay             = 2 * time.Minute
 	maxRetries                = 10

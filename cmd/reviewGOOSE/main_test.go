@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"runtime"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
+	"github.com/google/go-github/v57/github"
 )
 
 func TestMain(m *testing.M) {
@@ -1030,4 +1034,161 @@ func TestAuthErrorStatePreservation(t *testing.T) {
 		t.Errorf("Expected auth error to be cleared, got: %s", app.authError)
 	}
 	app.mu.RUnlock()
+}
+
+// TestTurnDataDisabled tests that turnData returns nil gracefully when Turn API is disabled.
+func TestTurnDataDisabled(t *testing.T) {
+	ctx := context.Background()
+
+	app := &App{
+		mu:         sync.RWMutex{},
+		turnClient: nil, // Simulates TURNSERVER=disabled
+		cacheDir:   t.TempDir(),
+	}
+
+	// turnData should return nil without error when disabled
+	data, cached, err := app.turnData(ctx, "https://github.com/test/repo/pull/1", time.Now())
+	if err != nil {
+		t.Errorf("Expected no error when Turn API disabled, got: %v", err)
+	}
+	if data != nil {
+		t.Error("Expected nil data when Turn API disabled")
+	}
+	if cached {
+		t.Error("Expected cached=false when Turn API disabled")
+	}
+}
+
+// TestSprinklerDisabled tests that initSprinklerOrgs returns nil gracefully when Sprinkler is disabled.
+func TestSprinklerDisabled(t *testing.T) {
+	ctx := context.Background()
+
+	app := &App{
+		mu:               sync.RWMutex{},
+		client:           github.NewClient(nil), // Need a non-nil client
+		sprinklerMonitor: nil,                   // Simulates SPRINKLER=disabled
+	}
+
+	// initSprinklerOrgs should return nil without error when disabled
+	err := app.initSprinklerOrgs(ctx)
+	if err != nil {
+		t.Errorf("Expected no error when Sprinkler disabled, got: %v", err)
+	}
+}
+
+// TestCustomTurnServer tests that a custom TURNSERVER hostname routes requests correctly.
+func TestCustomTurnServer(t *testing.T) {
+	ctx := context.Background()
+
+	// Create a mock Turn API server
+	requestReceived := false
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived = true
+
+		// Verify the request is to the validate endpoint
+		if r.URL.Path != "/v1/validate" {
+			t.Errorf("Expected request to /v1/validate, got: %s", r.URL.Path)
+		}
+
+		// Return a valid Turn API response matching the expected schema:
+		// - turn.CheckResponse contains prx.PullRequest and turn.Analysis
+		// - CheckSummary fields are map[string]string (check name -> status description)
+		resp := map[string]any{
+			"timestamp": time.Now().Format(time.RFC3339),
+			"commit":    "abc123def456",
+			"pull_request": map[string]any{
+				"number":     1,
+				"state":      "open",
+				"title":      "Test PR",
+				"author":     "testauthor",
+				"author_bot": false,
+				"draft":      false,
+				"merged":     false,
+				"test_state": "passing",
+				"created_at": time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
+				"updated_at": time.Now().Format(time.RFC3339),
+				"head_sha":   "abc123def456",
+				"check_summary": map[string]any{
+					"success":   map[string]string{"ci/test": "All tests passed"},
+					"failing":   map[string]string{},
+					"pending":   map[string]string{},
+					"cancelled": map[string]string{},
+					"skipped":   map[string]string{},
+					"stale":     map[string]string{},
+					"neutral":   map[string]string{},
+				},
+			},
+			"analysis": map[string]any{
+				"workflow_state": "WAITING_FOR_REVIEW",
+				"next_action": map[string]any{
+					"testuser": map[string]any{
+						"kind":     "review",
+						"reason":   "PR is ready for review",
+						"critical": true,
+						"since":    time.Now().Format(time.RFC3339),
+					},
+				},
+				"last_activity": map[string]any{
+					"timestamp": time.Now().Format(time.RFC3339),
+					"kind":      "push",
+					"actor":     "testauthor",
+					"message":   "Pushed new commits",
+				},
+				"size":        "S",
+				"ready_merge": false,
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Errorf("Failed to encode response: %v", err)
+		}
+	}))
+	defer mockServer.Close()
+
+	// Create a Turn client pointing to our mock server
+	turnClient, err := turn.NewClient(mockServer.URL)
+	if err != nil {
+		t.Fatalf("Failed to create turn client: %v", err)
+	}
+	turnClient.SetAuthToken("test-token")
+
+	// Create app with the custom turn client
+	login := "testuser"
+	app := &App{
+		mu:         sync.RWMutex{},
+		turnClient: turnClient,
+		cacheDir:   t.TempDir(),
+		noCache:    true, // Skip cache to ensure we hit the API
+		currentUser: &github.User{
+			Login: &login,
+		},
+	}
+
+	// Make a request
+	data, _, err := app.turnData(ctx, "https://github.com/test/repo/pull/1", time.Now())
+	if err != nil {
+		t.Fatalf("turnData failed: %v", err)
+	}
+
+	// Verify the mock server received the request
+	if !requestReceived {
+		t.Error("Expected request to be sent to custom Turn server")
+	}
+
+	// Verify we got a valid response
+	if data == nil {
+		t.Fatal("Expected non-nil response from custom Turn server")
+	}
+	if data.PullRequest.State != "open" {
+		t.Errorf("Expected state 'open', got: %s", data.PullRequest.State)
+	}
+	if data.PullRequest.TestState != "passing" {
+		t.Errorf("Expected test_state 'passing', got: %s", data.PullRequest.TestState)
+	}
+	if data.Analysis.WorkflowState != "WAITING_FOR_REVIEW" {
+		t.Errorf("Expected workflow_state 'WAITING_FOR_REVIEW', got: %s", data.Analysis.WorkflowState)
+	}
+	if _, hasAction := data.Analysis.NextAction["testuser"]; !hasAction {
+		t.Error("Expected NextAction to contain 'testuser'")
+	}
 }
