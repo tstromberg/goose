@@ -1,17 +1,17 @@
-# Review Goose 🪿
+# reviewGOOSE 🪿
 
 ![Beta](https://img.shields.io/badge/status-beta-orange)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20BSD%20%7C%20Windows-blue)
 ![Goose Noises](https://img.shields.io/badge/goose%20noises-100%25%20more-green)
 [![GitHub](https://img.shields.io/github/stars/ready-to-review/goose?style=social)](https://github.com/ready-to-review/goose)
 
-![Review Goose Logo](media/logo-small.png)
+![reviewGOOSE Logo](media/logo-small.png)
 
 The only PR tracker that honks at you when you're the bottleneck. Now shipping with 100% more goose noises!
 
 Lives in your menubar like a tiny waterfowl of productivity shame, watching your GitHub PRs and making aggressive bird sounds when you're blocking someone's code from seeing the light of production.
 
-![Review Goose Screenshot](media/screenshot.png)
+![reviewGOOSE Screenshot](media/screenshot.png)
 
 ## macOS Quick Start ⚡ (Get Honked At)
 
@@ -19,28 +19,28 @@ Homebrew users can get the party started quickly:
 
 ```shell
 
-brew install --cask codeGROOVE-dev/homebrew-tap/review-goose
+brew install --cask codeGROOVE-dev/homebrew-tap/reviewGOOSE
 gh auth status || gh auth login
 ```
 
-Open `/Applications/Review Goose.app`. To be persistently annoyed every time you login, click the `Start at Login` menu item.
+Open `/Applications/reviewGOOSE.app`. To be persistently annoyed every time you login, click the `Start at Login` menu item.
 
 ## Homebrew on Linux Quick Start ⚡
 
 On a progressive Linux distribution that includes Homebrew, such as [Bluefin](https://projectbluefin.io/)? You are just a cut and paste away from excitement:
 
 ```shell
-brew install codeGROOVE-dev/homebrew-tap/review-goose
+brew install codeGROOVE-dev/homebrew-tap/reviewGOOSE
 gh auth status || gh auth login
 ```
 
 ## Linux/BSD/Windows Medium Start
 
 1. Install the [GitHub CLI](https://cli.github.com/) and [Go](https://go.dev/dl/) via your platforms recommended methods
-2. Install Review Goose:
+2. Install reviewGOOSE:
 
 ```bash
-go install github.com/codeGROOVE-dev/goose/cmd/review-goose@latest
+go install github.com/codeGROOVE-dev/goose/cmd/reviewGOOSE@latest
 ```
 
 3. Copy goose from $HOME/go/bin to wherever you prefer
@@ -56,7 +56,7 @@ If you want more control over which repositories the goose can access - for exam
 You can then use the token like so:
 
 ```bash
-env GITHUB_TOKEN=your_token_here review-goose
+env GITHUB_TOKEN=your_token_here reviewGOOSE
 ```
 
 ## Usage
