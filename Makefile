@@ -1,12 +1,12 @@
-APP_NAME = review-goose
-BUNDLE_NAME = Review Goose
+APP_NAME = reviewGOOSE
+BUNDLE_NAME = reviewGOOSE
 VERSION = 1.0.0
 BUNDLE_VERSION = 1
 BUNDLE_ID = dev.codegroove.r2r
 
 # Version information for builds
 # Try VERSION file first (for release tarballs), then fall back to git
-VERSION_FILE := $(shell cat cmd/review-goose/VERSION 2>/dev/null)
+VERSION_FILE := $(shell cat cmd/reviewGOOSE/VERSION 2>/dev/null)
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
 BUILD_VERSION := $(or $(VERSION_FILE),$(GIT_VERSION),dev)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -51,18 +51,18 @@ ifeq ($(shell uname),Darwin)
 	@echo "Running $(BUNDLE_NAME) from /Applications..."
 	@open "/Applications/$(BUNDLE_NAME).app"
 else
-	go run ./cmd/review-goose
+	go run ./cmd/reviewGOOSE
 endif
 
 # Build for current platform
 build: out
 ifeq ($(OS),Windows_NT)
 	@echo "Building $(APP_NAME) for Windows..."
-	@CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME).exe ./cmd/review-goose
+	@CGO_ENABLED=1 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME).exe ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME).exe"
 else
 	@echo "Building $(APP_NAME) for $(shell uname -s)/$(shell uname -m)..."
-	@CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME) ./cmd/review-goose
+	@CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME) ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME)"
 endif
 
@@ -72,30 +72,30 @@ build-all: build-darwin build-linux build-windows
 # Build for macOS (both architectures)
 build-darwin: out
 	@echo "Building $(APP_NAME) for darwin/amd64..."
-	@CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 ./cmd/review-goose
+	@CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-amd64 ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME)-darwin-amd64"
 	@echo "Building $(APP_NAME) for darwin/arm64..."
-	@CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 ./cmd/review-goose
+	@CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-darwin-arm64 ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME)-darwin-arm64"
 
 # Build for Linux (both architectures)
 # Note: CGO cross-compilation requires appropriate cross-compiler toolchain
 build-linux: out
 	@echo "Building $(APP_NAME) for linux/amd64..."
-	@CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 ./cmd/review-goose
+	@CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-amd64 ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME)-linux-amd64"
 	@echo "Building $(APP_NAME) for linux/arm64..."
-	@CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 ./cmd/review-goose
+	@CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o out/$(APP_NAME)-linux-arm64 ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME)-linux-arm64"
 
 # Build for Windows (both architectures)
 # Note: CGO cross-compilation requires appropriate cross-compiler toolchain
 build-windows: out
 	@echo "Building $(APP_NAME) for windows/amd64..."
-	@CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe ./cmd/review-goose
+	@CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-amd64.exe ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME)-windows-amd64.exe"
 	@echo "Building $(APP_NAME) for windows/arm64..."
-	@CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe ./cmd/review-goose
+	@CGO_ENABLED=1 GOOS=windows GOARCH=arm64 go build -ldflags "-H=windowsgui $(LDFLAGS)" -o out/$(APP_NAME)-windows-arm64.exe ./cmd/reviewGOOSE
 	@echo "✓ Created: out/$(APP_NAME)-windows-arm64.exe"
 
 # Clean build artifacts
@@ -119,7 +119,7 @@ $(APPIFY_BIN):
 install-appify: $(APPIFY_BIN)
 
 # Internal helper to create app bundle from a binary
-# Usage: make _create-app-bundle BUNDLE_BINARY=review-goose
+# Usage: make _create-app-bundle BUNDLE_BINARY=reviewGOOSE
 define create-app-bundle
 	@echo "Removing old app bundle..."
 	@rm -rf "out/$(BUNDLE_NAME).app"
@@ -162,8 +162,8 @@ define create-app-bundle
 		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 	@/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
 		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_VERSION)" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
-	@/usr/libexec/PlistBuddy -c "Add :CFBundleGetInfoString string 'Review Goose $(BUILD_VERSION)'" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
-		/usr/libexec/PlistBuddy -c "Set :CFBundleGetInfoString 'Review Goose $(BUILD_VERSION)'" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
+	@/usr/libexec/PlistBuddy -c "Add :CFBundleGetInfoString string 'reviewGOOSE $(BUILD_VERSION)'" "out/$(BUNDLE_NAME).app/Contents/Info.plist" 2>/dev/null || \
+		/usr/libexec/PlistBuddy -c "Set :CFBundleGetInfoString 'reviewGOOSE $(BUILD_VERSION)'" "out/$(BUNDLE_NAME).app/Contents/Info.plist"
 
 	@echo "Code signing the app bundle..."
 	@xattr -cr "out/$(BUNDLE_NAME).app"
@@ -320,8 +320,8 @@ release:
 	@echo "→ Running linters..."
 	@$(MAKE) lint
 	@echo "Creating VERSION file..."
-	@echo "$(VERSION)" > cmd/review-goose/VERSION
-	@git add cmd/review-goose/VERSION
+	@echo "$(VERSION)" > cmd/reviewGOOSE/VERSION
+	@git add cmd/reviewGOOSE/VERSION
 	@if [ -n "$$(git diff --cached --name-only)" ]; then \
 		git commit -m "Release $(VERSION)"; \
 	fi

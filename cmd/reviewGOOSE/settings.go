@@ -29,7 +29,7 @@ func (app *App) loadSettings() {
 		return
 	}
 
-	settingsPath := filepath.Join(configDir, "review-goose", "settings.json")
+	settingsPath := filepath.Join(configDir, "reviewGOOSE", "settings.json")
 	data, err := os.ReadFile(settingsPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -66,7 +66,7 @@ func (app *App) saveSettings() {
 		slog.Error("Failed to get settings directory", "error", err)
 		return
 	}
-	settingsDir := filepath.Join(configDir, "review-goose")
+	settingsDir := filepath.Join(configDir, "reviewGOOSE")
 
 	app.mu.RLock()
 	settings := Settings{

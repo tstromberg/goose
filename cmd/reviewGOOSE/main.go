@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/codeGROOVE-dev/goose/cmd/review-goose/x11tray"
+	"github.com/codeGROOVE-dev/goose/cmd/reviewGOOSE/x11tray"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray"
@@ -71,6 +71,7 @@ const (
 	defaultMaxBrowserOpensDay = 20
 	startupGracePeriod        = 1 * time.Minute // Don't play sounds or auto-open for first minute
 	authRetryInterval         = 2 * time.Minute // Retry authentication periodically when in error state
+	ancientPRThreshold        = 24 * time.Hour  // Refuse to notify for PRs with no activity in this long (safety check)
 )
 
 // PR represents a pull request with metadata.
@@ -79,6 +80,7 @@ type PR struct {
 	CreatedAt         time.Time
 	TurnDataAppliedAt time.Time
 	FirstBlockedAt    time.Time // When this PR was first detected as blocked
+	LastActivityAt    time.Time // Most recent activity timestamp from Turn API (includes test completions)
 	Title             string
 	URL               string
 	Repository        string
@@ -212,7 +214,7 @@ func main() {
 		slog.Error("Failed to get cache directory", "error", err)
 		os.Exit(1)
 	}
-	cacheDir = filepath.Join(cacheDir, "review-goose")
+	cacheDir = filepath.Join(cacheDir, "reviewGOOSE")
 	const dirPerm = 0o700 // Only owner can access cache directory
 	if err := os.MkdirAll(cacheDir, dirPerm); err != nil {
 		slog.Error("Failed to create cache directory", "error", err)
@@ -402,9 +404,9 @@ func (app *App) handleReauthentication(ctx context.Context) {
 	}
 
 	// Update tooltip
-	tooltip := "Review Goose"
+	tooltip := "reviewGOOSE"
 	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
+		tooltip = fmt.Sprintf("reviewGOOSE (@%s)", app.targetUser)
 	}
 	systray.SetTooltip(tooltip)
 
@@ -551,9 +553,9 @@ func (app *App) onReady(ctx context.Context) {
 	app.setTrayIcon(IconSmiling, PRCounts{}) // Start with smiling icon while loading
 
 	// Set tooltip based on whether we're using a custom user
-	tooltip := "Review Goose"
+	tooltip := "reviewGOOSE"
 	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
+		tooltip = fmt.Sprintf("reviewGOOSE (@%s)", app.targetUser)
 	}
 	systray.SetTooltip(tooltip)
 

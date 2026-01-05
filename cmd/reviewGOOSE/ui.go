@@ -212,9 +212,9 @@ func (app *App) setTrayTitle() {
 	app.setTrayIcon(iconType, counts)
 
 	// Update tooltip to match current state
-	tooltip := "Review Goose"
+	tooltip := "reviewGOOSE"
 	if app.targetUser != "" {
-		tooltip = fmt.Sprintf("Review Goose (@%s)", app.targetUser)
+		tooltip = fmt.Sprintf("reviewGOOSE (@%s)", app.targetUser)
 	}
 	systray.SetTooltip(tooltip)
 }
@@ -681,7 +681,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 		// Determine hostname and error type
 		hostname := "api.github.com"
 		for _, h := range []struct{ match, host string }{
-			{"ready-to-review.dev", "dash.ready-to-review.dev"},
+			{"reviewGOOSE.dev", "dash.reviewGOOSE.dev"},
 			{"api.github.com", "api.github.com"},
 			{"github.com", "github.com"},
 		} {
@@ -740,7 +740,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Add Web Dashboard link
 	dashboardItem := app.systrayInterface.AddMenuItem("Web Dashboard", "")
 	dashboardItem.Click(func() {
-		if err := openURL(ctx, "https://dash.ready-to-review.dev/", ""); err != nil {
+		if err := openURL(ctx, "https://reviewGOOSE.dev/", ""); err != nil {
 			slog.Error("failed to open dashboard", "error", err)
 		}
 	})
