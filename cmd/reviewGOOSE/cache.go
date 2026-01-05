@@ -96,6 +96,12 @@ func (app *App) checkCache(cacheFile, url string, updatedAt time.Time) (cachedDa
 
 // turnData fetches Turn API data with caching.
 func (app *App) turnData(ctx context.Context, url string, updatedAt time.Time) (*turn.CheckResponse, bool, error) {
+	// If Turn API is disabled, return nil without error
+	if app.turnClient == nil {
+		slog.Debug("[TURN] Turn API disabled, skipping", "url", url)
+		return nil, false, nil
+	}
+
 	hasRunningTests := false
 	// Validate URL before processing
 	if err := safebrowse.ValidateURL(url); err != nil {
