@@ -1,6 +1,6 @@
 # reviewGOOSE 🪿
 
-![Beta](https://img.shields.io/badge/status-beta-orange)
+![Stable](https://img.shields.io/badge/status-beta-orange)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20BSD%20%7C%20Windows-blue)
 ![Goose Noises](https://img.shields.io/badge/goose%20noises-100%25%20more-green)
 [![GitHub](https://img.shields.io/github/stars/ready-to-review/goose?style=social)](https://github.com/ready-to-review/goose)
