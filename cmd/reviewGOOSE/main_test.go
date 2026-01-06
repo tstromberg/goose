@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -887,7 +888,8 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 
 // TestAuthRetryLoopStopsOnSuccess tests that the auth retry loop stops when auth succeeds.
 func TestAuthRetryLoopStopsOnSuccess(t *testing.T) {
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	app := &App{
 		mu:               sync.RWMutex{},
@@ -895,30 +897,36 @@ func TestAuthRetryLoopStopsOnSuccess(t *testing.T) {
 		systrayInterface: &MockSystray{},
 	}
 
-	// Track how many times we check authError
-	checkCount := 0
+	// Track how many times we check authError (use atomic for thread safety)
+	var checkCount atomic.Int32
 	done := make(chan struct{})
+	exitReason := make(chan string, 1)
 
 	// Start a goroutine that simulates the auth retry loop behavior
 	go func() {
 		defer close(done)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
+				exitReason <- "context canceled"
 				return
-			case <-time.After(10 * time.Millisecond): // Fast ticker for testing
+			case <-ticker.C:
 				app.mu.RLock()
 				hasError := app.authError != ""
 				app.mu.RUnlock()
 
-				checkCount++
+				count := checkCount.Add(1)
 
 				if !hasError {
+					exitReason <- fmt.Sprintf("auth succeeded after %d checks", count)
 					return // Loop should exit when auth succeeds
 				}
 
 				// Simulate clearing auth error on 3rd attempt
-				if checkCount >= 3 {
+				if count >= 3 {
 					app.mu.Lock()
 					app.authError = ""
 					app.mu.Unlock()
@@ -931,8 +939,14 @@ func TestAuthRetryLoopStopsOnSuccess(t *testing.T) {
 	select {
 	case <-done:
 		// Success - loop exited
-	case <-time.After(1 * time.Second):
-		t.Fatal("Auth retry loop did not stop after auth succeeded")
+		reason := "unknown"
+		select {
+		case reason = <-exitReason:
+		default:
+		}
+		t.Logf("Goroutine exited: %s", reason)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Auth retry loop did not stop after auth succeeded (checkCount=%d)", checkCount.Load())
 	}
 
 	// Verify auth error was cleared
@@ -944,8 +958,9 @@ func TestAuthRetryLoopStopsOnSuccess(t *testing.T) {
 		t.Errorf("Expected auth error to be cleared, got: %s", finalError)
 	}
 
-	if checkCount < 3 {
-		t.Errorf("Expected at least 3 retry attempts, got: %d", checkCount)
+	finalCount := checkCount.Load()
+	if finalCount < 3 {
+		t.Errorf("Expected at least 3 retry attempts, got: %d", finalCount)
 	}
 }
 
