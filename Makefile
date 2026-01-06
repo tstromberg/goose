@@ -311,6 +311,8 @@ release:
 		echo "Error: VERSION must be in format vX.Y.Z or vX.Y.Z-suffix (e.g., v1.0.0, v1.0.0-alpha)"; \
 		exit 1; \
 	fi
+	@echo "→ Pulling latest changes..."
+	@git pull
 	@if git rev-parse "$(VERSION)" >/dev/null 2>&1; then \
 		echo "Error: Tag $(VERSION) already exists"; \
 		exit 1; \
@@ -333,7 +335,6 @@ release:
 	fi
 	@echo "Creating and pushing tag $(VERSION)..."
 	@git tag "$(VERSION)"
-	@git push origin main
-	@git push origin "$(VERSION)"
+	@git push --tags --force
 	@echo "✓ Release $(VERSION) created and pushed successfully"
 	@echo "  View release at: https://github.com/codeGROOVE-dev/goose/releases/tag/$(VERSION)"
