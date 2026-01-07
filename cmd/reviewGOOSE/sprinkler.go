@@ -119,7 +119,7 @@ func (sm *sprinklerMonitor) start(ctx context.Context) error {
 		ServerURL:      "wss://" + serverAddr + "/ws",
 		Token:          sm.token,
 		Organization:   "*", // Monitor all orgs
-		EventTypes:     []string{"pull_request"},
+		EventTypes:     []string{"*"},
 		UserEventsOnly: false,
 		Verbose:        false,
 		NoReconnect:    false,
