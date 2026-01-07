@@ -2,8 +2,6 @@ module github.com/codeGROOVE-dev/goose
 
 go 1.25.4
 
-replace github.com/codeGROOVE-dev/sprinkler => ../sprinkler
-
 require (
 	github.com/codeGROOVE-dev/retry v1.3.1
 	github.com/codeGROOVE-dev/sprinkler v0.0.0-20260107012903-de12e2b7508a
