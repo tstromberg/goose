@@ -74,6 +74,16 @@ const (
 	ancientPRThreshold        = 24 * time.Hour  // Refuse to notify for PRs with no activity in this long (safety check)
 )
 
+// simplifySource transforms slog source attributes to show only filename:line.
+func simplifySource(_ []string, a slog.Attr) slog.Attr {
+	if a.Key == slog.SourceKey {
+		if s, ok := a.Value.Any().(*slog.Source); ok {
+			a.Value = slog.StringValue(fmt.Sprintf("%s:%d", filepath.Base(s.File), s.Line))
+		}
+	}
+	return a
+}
+
 // PR represents a pull request with metadata.
 type PR struct {
 	UpdatedAt         time.Time
@@ -195,10 +205,7 @@ func main() {
 	if debugMode {
 		logLevel = slog.LevelDebug
 	}
-	opts := &slog.HandlerOptions{
-		AddSource: true,
-		Level:     logLevel,
-	}
+	opts := &slog.HandlerOptions{AddSource: true, Level: logLevel, ReplaceAttr: simplifySource}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
 	slog.Info("Starting Goose", "version", getVersion(), "commit", commit, "date", date)
 	slog.Info("Configuration", "update_interval", updateInterval, "max_retries", maxRetries, "max_delay", maxRetryDelay)

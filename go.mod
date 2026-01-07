@@ -2,10 +2,12 @@ module github.com/codeGROOVE-dev/goose
 
 go 1.25.4
 
+replace github.com/codeGROOVE-dev/sprinkler => ../sprinkler
+
 require (
 	github.com/codeGROOVE-dev/retry v1.3.1
-	github.com/codeGROOVE-dev/sprinkler v0.0.0-20251113030909-5962af625370
-	github.com/codeGROOVE-dev/turnclient v0.0.0-20251210023051-bbb7e1943ebd
+	github.com/codeGROOVE-dev/sprinkler v0.0.0-20260107012903-de12e2b7508a
+	github.com/codeGROOVE-dev/turnclient v0.0.0-20260106162340-d8be78b5c41f
 	github.com/energye/systray v1.0.2
 	github.com/gen2brain/beeep v0.11.2
 	github.com/godbus/dbus/v5 v5.2.2
