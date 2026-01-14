@@ -304,9 +304,6 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 
 		// Add bullet point or emoji based on PR status
 		switch {
-		case pr.WorkflowState == string(turn.StateNewlyPublished):
-			// Use gem emoji for newly published PRs
-			title = fmt.Sprintf("💎 %s", title)
 		case pr.NeedsReview || pr.IsBlocked:
 			// Get the blocked time from state manager
 			prState, hasState := app.stateManager.PRState(pr.URL)
@@ -371,8 +368,11 @@ func (app *App) addPRSection(ctx context.Context, prs []PR, sectionTitle string,
 		case pr.ActionKind != "":
 			// PR has an action but isn't blocked - add bullet to indicate it could use input
 			title = fmt.Sprintf("• %s", title)
+		case pr.WorkflowState == string(turn.StateNewlyPublished) && time.Since(pr.UpdatedAt) < time.Minute:
+			// Use gem emoji for newly published PRs updated within the last minute
+			title = fmt.Sprintf("💎 %s", title)
 		default:
-			// No special prefix needed
+			// No prefix needed
 		}
 
 		// Format age for tooltip
@@ -520,9 +520,6 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 
 		// Add bullet point or emoji for blocked PRs (same logic as in addPRSection)
 		switch {
-		case pr.WorkflowState == string(turn.StateNewlyPublished):
-			// Use gem emoji for newly published PRs
-			title = fmt.Sprintf("💎 %s", title)
 		case pr.NeedsReview || pr.IsBlocked:
 			prState, hasState := app.stateManager.PRState(pr.URL)
 
@@ -583,8 +580,11 @@ func (app *App) generatePRSectionTitles(prs []PR, sectionTitle string, hiddenOrg
 		case pr.ActionKind != "":
 			// PR has an action but isn't blocked - add bullet to indicate it could use input
 			title = fmt.Sprintf("• %s", title)
+		case pr.WorkflowState == string(turn.StateNewlyPublished) && time.Since(pr.UpdatedAt) < time.Minute:
+			// Use gem emoji for newly published PRs updated within the last minute
+			title = fmt.Sprintf("💎 %s", title)
 		default:
-			// No special prefix needed
+			// No prefix needed
 		}
 
 		titles = append(titles, title)
