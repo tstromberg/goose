@@ -2,7 +2,7 @@ APP_NAME = reviewGOOSE
 BUNDLE_NAME = reviewGOOSE
 VERSION = 1.0.0
 BUNDLE_VERSION = 1
-BUNDLE_ID = dev.codegroove.r2r
+BUNDLE_ID = dev.codegroove.reviewGOOSE
 
 # Version information for builds
 # Try VERSION file first (for release tarballs), then fall back to git
