@@ -11,179 +11,217 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/energye/systray"
 )
 
-// validateAndEscapePathForAppleScript validates and escapes a path for safe use in AppleScript.
-// Returns empty string if path contains invalid characters.
-func validateAndEscapePathForAppleScript(path string) string {
-	// Validate path contains only safe characters
-	for _, r := range path {
+var (
+	legacyCleanupOnce sync.Once
+	loginItemMu       sync.Mutex  // prevents concurrent toggle operations
+	loginItemCached   atomic.Bool // cached state to avoid repeated osascript calls
+	loginItemChecked  atomic.Bool // whether we've done the initial check
+)
+
+const osascriptTimeout = 10 * time.Second
+
+// escapeForAppleScript validates and escapes a string for safe use in AppleScript.
+func escapeForAppleScript(s string) string {
+	for _, r := range s {
 		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
 			(r < '0' || r > '9') && r != ' ' && r != '.' &&
 			r != '/' && r != '-' && r != '_' {
-			slog.Error("Path contains invalid character for AppleScript", "char", string(r), "path", path)
+			slog.Error("invalid character for AppleScript", "char", string(r), "input", s)
 			return ""
 		}
 	}
-	// Escape backslashes first then quotes
-	path = strings.ReplaceAll(path, `\`, `\\`)
-	path = strings.ReplaceAll(path, `"`, `\"`)
-	return path
+	return strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`)
 }
 
-// isLoginItem checks if the app is set to start at login.
-func isLoginItem(ctx context.Context) bool {
-	appPath, err := appPath()
+// bundlePath returns the .app bundle path, or an error if not running from one.
+func bundlePath() (string, error) {
+	p, err := os.Executable()
 	if err != nil {
-		slog.Error("Failed to get app path", "error", err)
+		return "", fmt.Errorf("executable: %w", err)
+	}
+	p, err = filepath.EvalSymlinks(p)
+	if err != nil {
+		return "", fmt.Errorf("symlinks: %w", err)
+	}
+	if i := strings.Index(p, ".app/Contents/MacOS/"); i != -1 {
+		return p[:i+4], nil
+	}
+	return "", errors.New("not an app bundle")
+}
+
+// queryLoginItemEnabled queries System Events for login item status (slow, use sparingly).
+func queryLoginItemEnabled(ctx context.Context) bool {
+	bp, err := bundlePath()
+	if err != nil {
+		return false
+	}
+	ep := escapeForAppleScript(bp)
+	if ep == "" {
 		return false
 	}
 
-	// Use osascript to check login items
-	escapedPath := validateAndEscapePathForAppleScript(appPath)
-	if escapedPath == "" {
-		slog.Error("Invalid app path for AppleScript", "path", appPath)
-		return false
-	}
-	// We use %s here because the string is already validated and escaped
-	//nolint:gocritic // already escaped
+	ctx, cancel := context.WithTimeout(ctx, osascriptTimeout)
+	defer cancel()
+
+	//nolint:gocritic // ep is already escaped
 	script := fmt.Sprintf(
-		`tell application "System Events" to get the name of every login item where path is "%s"`,
-		escapedPath)
-	slog.Debug("Executing command", "command", "osascript", "script", script)
-	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
-	output, err := cmd.CombinedOutput()
+		`tell application "System Events" to get the name of every login item where path is "%s"`, ep)
+	out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
 	if err != nil {
-		slog.Error("Failed to check login items", "error", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			slog.Warn("timeout checking login item")
+		} else {
+			slog.Debug("failed to check login item", "error", err)
+		}
 		return false
 	}
+	return strings.TrimSpace(string(out)) != ""
+}
 
-	result := strings.TrimSpace(string(output))
-	return result != ""
+// loginItemEnabled returns cached login item state (fast, safe to call frequently).
+func loginItemEnabled() bool {
+	return loginItemCached.Load()
 }
 
 // setLoginItem adds or removes the app from login items.
 func setLoginItem(ctx context.Context, enable bool) error {
-	appPath, err := appPath()
+	bp, err := bundlePath()
 	if err != nil {
-		return fmt.Errorf("get app path: %w", err)
+		return err
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, osascriptTimeout)
+	defer cancel()
+
+	var script string
 	if enable {
-		// Add to login items
-		escapedPath := validateAndEscapePathForAppleScript(appPath)
-		if escapedPath == "" {
-			return fmt.Errorf("invalid app path for AppleScript: %s", appPath)
+		ep := escapeForAppleScript(bp)
+		if ep == "" {
+			return fmt.Errorf("invalid path: %s", bp)
 		}
-		// We use %s here because the string is already validated and escaped
-		//nolint:gocritic // already escaped
-		script := fmt.Sprintf(
-			`tell application "System Events" to make login item at end with properties {path:"%s", hidden:false}`,
-			escapedPath)
-		slog.Debug("Executing command", "command", "osascript", "script", script)
-		cmd := exec.CommandContext(ctx, "osascript", "-e", script)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("add login item: %w (output: %s)", err, string(output))
-		}
-		slog.Info("Added to login items", "path", appPath)
+		//nolint:gocritic // ep is already escaped
+		script = fmt.Sprintf(
+			`tell application "System Events" to make login item at end with properties {path:"%s", hidden:false}`, ep)
 	} else {
-		// Remove from login items
-		appName := filepath.Base(appPath)
-		appName = strings.TrimSuffix(appName, ".app")
-		escapedName := validateAndEscapePathForAppleScript(appName)
-		if escapedName == "" {
-			return fmt.Errorf("invalid app name for AppleScript: %s", appName)
+		name := strings.TrimSuffix(filepath.Base(bp), ".app")
+		en := escapeForAppleScript(name)
+		if en == "" {
+			return fmt.Errorf("invalid name: %s", name)
 		}
-		// We use %s here because the string is already validated and escaped
-		script := fmt.Sprintf(`tell application "System Events" to delete login item "%s"`, escapedName) //nolint:gocritic // already escaped
-		slog.Debug("Executing command", "command", "osascript", "script", script)
-		cmd := exec.CommandContext(ctx, "osascript", "-e", script)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			// Ignore error if item doesn't exist
-			if !strings.Contains(string(output), "Can't get login item") {
-				return fmt.Errorf("remove login item: %w (output: %s)", err, string(output))
-			}
-		}
-		slog.Info("Removed from login items", "app", appName)
+		//nolint:gocritic // en is already escaped
+		script = fmt.Sprintf(`tell application "System Events" to delete login item "%s"`, en)
 	}
 
+	slog.Debug("executing login item command", "enable", enable)
+	out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput()
+	if err != nil {
+		s := string(out)
+		if !enable && strings.Contains(s, "Can't get login item") {
+			return nil
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return errors.New("timed out")
+		}
+		return fmt.Errorf("%w (output: %s)", err, s)
+	}
+	slog.Info("login item updated", "enabled", enable, "path", bp)
 	return nil
-}
-
-// appPath returns the path to the application bundle.
-func appPath() (string, error) {
-	// Get the executable path
-	execPath, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("get executable: %w", err)
-	}
-
-	// Resolve any symlinks
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return "", fmt.Errorf("eval symlinks: %w", err)
-	}
-
-	// Check if we're running from an app bundle
-	// App bundles have the structure: /path/to/App.app/Contents/MacOS/executable
-	if strings.Contains(execPath, ".app/Contents/MacOS/") {
-		// Extract the .app path
-		parts := strings.Split(execPath, ".app/Contents/MacOS/")
-		if len(parts) >= 2 {
-			return parts[0] + ".app", nil
-		}
-	}
-
-	// Not running from an app bundle, return empty string to indicate this
-	return "", errors.New("not running from app bundle")
 }
 
 // addLoginItemUI adds the login item menu option (macOS only).
 func addLoginItemUI(ctx context.Context, app *App) {
-	// Check if we're running from an app bundle
-	execPath, err := os.Executable()
-	if err != nil {
-		slog.Debug("Hiding 'Start at Login' menu item - could not get executable path")
+	if _, err := bundlePath(); err != nil {
+		slog.Debug("hiding Start at Login menu item", "error", err)
 		return
 	}
 
-	// Resolve any symlinks
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		slog.Debug("Hiding 'Start at Login' menu item - could not resolve symlinks")
-		return
+	// Remove legacy login items (once per session, async to not block menu).
+	// Uses background context since this is fire-and-forget cleanup.
+	legacyCleanupOnce.Do(func() {
+		go func() {
+			for _, name := range []string{"Ready to Review", "Review Goose"} {
+				en := escapeForAppleScript(name)
+				if en == "" {
+					continue
+				}
+				// Use background context - this cleanup should complete even if app is shutting down.
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), osascriptTimeout)
+				script := fmt.Sprintf(`tell application "System Events" to delete login item %q`, en)
+				out, err := exec.CommandContext(cleanupCtx, "osascript", "-e", script).CombinedOutput()
+				cancel()
+				if err == nil {
+					slog.Info("removed legacy login item", "name", name)
+				} else if !strings.Contains(string(out), "Can't get login item") {
+					slog.Debug("could not remove legacy login item", "name", name, "error", err)
+				}
+			}
+		}()
+	})
+
+	// Check state asynchronously on first menu build, use cached value for display.
+	if !loginItemChecked.Load() {
+		go func() {
+			loginItemCached.Store(queryLoginItemEnabled(ctx))
+			loginItemChecked.Store(true)
+			slog.Debug("login item state refreshed", "enabled", loginItemCached.Load())
+		}()
 	}
 
-	// App bundles have the structure: /path/to/App.app/Contents/MacOS/executable
-	if !strings.Contains(execPath, ".app/Contents/MacOS/") {
-		slog.Debug("Hiding 'Start at Login' menu item - not running from app bundle")
-		return
+	// Use cached state for menu display (fast, non-blocking).
+	text := "Start at Login"
+	if loginItemEnabled() {
+		text = "✓ Start at Login"
 	}
+	item := systray.AddMenuItem(text, "Automatically start when you log in")
 
-	// Add text checkmark for consistency with other menu items
-	var loginText string
-	if isLoginItem(ctx) {
-		loginText = "✓ Start at Login"
-	} else {
-		loginText = "Start at Login"
-	}
-	loginItem := systray.AddMenuItem(loginText, "Automatically start when you log in")
+	item.Click(func() {
+		// Prevent concurrent toggle operations.
+		if !loginItemMu.TryLock() {
+			slog.Debug("[LOGIN_ITEM] toggle already in progress")
+			return
+		}
+		defer loginItemMu.Unlock()
 
-	loginItem.Click(func() {
-		isEnabled := isLoginItem(ctx)
-		newState := !isEnabled
+		cur := loginItemEnabled()
+		next := !cur
+		slog.Debug("[LOGIN_ITEM] toggling", "from", cur, "to", next)
 
-		if err := setLoginItem(ctx, newState); err != nil {
-			slog.Error("Failed to set login item", "error", err)
+		// Optimistically update cache before the slow osascript call.
+		loginItemCached.Store(next)
+
+		if err := setLoginItem(ctx, next); err != nil {
+			slog.Error("[LOGIN_ITEM] failed to set", "error", err, "enable", next)
+			loginItemCached.Store(cur) // revert on failure
+			go showLoginItemError(ctx, next, err)
 			return
 		}
 
-		// Update UI state
-		slog.Info("[SETTINGS] Start at Login toggled", "enabled", newState)
-
-		// Rebuild menu to update checkmark
+		slog.Info("[SETTINGS] Start at Login toggled", "enabled", next)
 		app.rebuildMenu(ctx)
 	})
+}
+
+func showLoginItemError(ctx context.Context, enable bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	action, verb := "enable", "adding"
+	if !enable {
+		action, verb = "disable", "removing"
+	}
+	msg := fmt.Sprintf("Could not %s 'Start at Login'.\n\nError: %v\n\n"+
+		"Try %s reviewGOOSE manually in System Settings > General > Login Items.",
+		action, err, verb)
+	script := fmt.Sprintf(
+		`display dialog %q with title "reviewGOOSE" buttons {"OK"} default button "OK" with icon caution`, msg)
+	if out, err := exec.CommandContext(ctx, "osascript", "-e", script).CombinedOutput(); err != nil {
+		slog.Debug("failed to show error dialog", "error", err, "output", string(out))
+	}
 }
