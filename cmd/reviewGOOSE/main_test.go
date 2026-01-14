@@ -205,7 +205,8 @@ func TestMenuItemTitleTransition(t *testing.T) {
 	_ = ctx // Unused in this test but would be used for real menu operations
 }
 
-// TestWorkflowStateNewlyPublished tests that PRs with NEWLY_PUBLISHED workflow state get a 💎 bullet.
+// TestWorkflowStateNewlyPublished tests that PRs with NEWLY_PUBLISHED workflow state get a 💎 bullet
+// only when updated within the last minute and not blocked/needing review.
 func TestWorkflowStateNewlyPublished(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -213,7 +214,7 @@ func TestWorkflowStateNewlyPublished(t *testing.T) {
 		expectedTitle string
 	}{
 		{
-			name: "newly_published_with_action",
+			name: "newly_published_needs_review_gets_block_not_diamond",
 			pr: PR{
 				Repository:    "test/repo",
 				Number:        123,
@@ -222,10 +223,10 @@ func TestWorkflowStateNewlyPublished(t *testing.T) {
 				NeedsReview:   true,
 				UpdatedAt:     time.Now(),
 			},
-			expectedTitle: "💎 test/repo #123 — review",
+			expectedTitle: "■ test/repo #123 — review",
 		},
 		{
-			name: "newly_published_without_action",
+			name: "newly_published_recent_gets_diamond",
 			pr: PR{
 				Repository:    "test/repo",
 				Number:        456,
@@ -235,7 +236,17 @@ func TestWorkflowStateNewlyPublished(t *testing.T) {
 			expectedTitle: "💎 test/repo #456",
 		},
 		{
-			name: "newly_published_with_running_tests",
+			name: "newly_published_stale_no_prefix",
+			pr: PR{
+				Repository:    "test/repo",
+				Number:        457,
+				WorkflowState: string(turn.StateNewlyPublished),
+				UpdatedAt:     time.Now().Add(-2 * time.Minute),
+			},
+			expectedTitle: "test/repo #457",
+		},
+		{
+			name: "newly_published_with_running_tests_gets_diamond",
 			pr: PR{
 				Repository:    "test/repo",
 				Number:        789,
@@ -244,6 +255,17 @@ func TestWorkflowStateNewlyPublished(t *testing.T) {
 				UpdatedAt:     time.Now(),
 			},
 			expectedTitle: "💎 test/repo #789 — tests running...",
+		},
+		{
+			name: "newly_published_with_action_gets_bullet_not_diamond",
+			pr: PR{
+				Repository:    "test/repo",
+				Number:        790,
+				ActionKind:    "review",
+				WorkflowState: string(turn.StateNewlyPublished),
+				UpdatedAt:     time.Now(),
+			},
+			expectedTitle: "• test/repo #790 — review",
 		},
 		{
 			name: "not_newly_published_with_action",
@@ -273,12 +295,15 @@ func TestWorkflowStateNewlyPublished(t *testing.T) {
 					title = fmt.Sprintf("%s — tests running...", title)
 				}
 
-				// Add prefix based on workflow state or blocked status
+				// Add prefix based on blocked status, action, or newly published
+				// (mirrors priority order in ui.go - diamond is lowest priority)
 				switch {
-				case pr.WorkflowState == string(turn.StateNewlyPublished):
-					title = fmt.Sprintf("💎 %s", title)
 				case pr.NeedsReview || pr.IsBlocked:
 					title = fmt.Sprintf("■ %s", title)
+				case pr.ActionKind != "":
+					title = fmt.Sprintf("• %s", title)
+				case pr.WorkflowState == string(turn.StateNewlyPublished) && time.Since(pr.UpdatedAt) < time.Minute:
+					title = fmt.Sprintf("💎 %s", title)
 				}
 
 				return title
