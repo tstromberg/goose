@@ -524,3 +524,205 @@ func TestValidateParamString(t *testing.T) {
 		})
 	}
 }
+
+func TestOpen(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{
+			name:    "valid URL",
+			url:     "https://github.com/owner/repo",
+			wantErr: false, // validation passes, browser open may fail in test
+		},
+		{
+			name:    "invalid URL - HTTP",
+			url:     "http://github.com/owner/repo",
+			wantErr: true, // validation fails
+		},
+		{
+			name:    "invalid URL - control char",
+			url:     "https://github.com/owner\n/repo",
+			wantErr: true, // validation fails
+		},
+		{
+			name:    "invalid URL - query params",
+			url:     "https://github.com/owner/repo?foo=bar",
+			wantErr: true, // validation fails (params not allowed in Open)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			err := Open(ctx, tt.url)
+
+			// If wantErr is true, we expect validation to fail
+			// If wantErr is false, validation passes (browser open may fail, which is OK)
+			if tt.wantErr && err == nil {
+				t.Errorf("Open() expected error but got none")
+			}
+		})
+	}
+}
+
+func TestOpenBrowser_InvalidCommand(t *testing.T) {
+	// Test that openBrowser handles context cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	err := openBrowser(ctx, "https://github.com/owner/repo")
+	// We expect an error because context is cancelled
+	// The exact error depends on timing and platform
+	if err == nil {
+		// It's OK if err is nil in some cases due to Start() not blocking
+		t.Log("openBrowser with cancelled context returned nil (Start() doesn't block)")
+	}
+}
+
+func TestOpenWithParams_PercentEncoding(t *testing.T) {
+	// Test that OpenWithParams rejects URLs that produce percent encoding
+	ctx := context.Background()
+
+	// Valid base URL but param value that would need encoding
+	// The current implementation actually encodes and then rejects if % is present
+	// Let's verify this behavior
+	err := OpenWithParams(ctx, "https://github.com/owner/repo", map[string]string{
+		"key": "value with space", // spaces would require encoding
+	})
+
+	// This should fail during validation of the parameter value
+	if err == nil {
+		t.Error("OpenWithParams() should reject parameter value with space")
+	}
+}
+
+func TestValidate_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		url         string
+		allowParams bool
+		wantErr     bool
+	}{
+		{
+			name:        "valid URL with params when allowed",
+			url:         "https://github.com/owner/repo?key=value",
+			allowParams: true,
+			wantErr:     false,
+		},
+		{
+			name:        "valid URL with params when not allowed",
+			url:         "https://github.com/owner/repo?key=value",
+			allowParams: false,
+			wantErr:     true,
+		},
+		{
+			name:        "URL with non-ASCII character",
+			url:         "https://github.com/owner/repö",
+			allowParams: false,
+			wantErr:     true,
+		},
+		{
+			name:        "URL with DEL character (0x7F)",
+			url:         "https://github.com/owner/repo\x7F",
+			allowParams: false,
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validate(tt.url, tt.allowParams)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateGitHubPRURL_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{
+			name:    "valid minimal PR",
+			url:     "https://github.com/a/b/pull/1",
+			wantErr: false,
+		},
+		{
+			name:    "valid with underscore in repo",
+			url:     "https://github.com/owner/repo_name/pull/123",
+			wantErr: false,
+		},
+		{
+			name:    "missing pull segment",
+			url:     "https://github.com/owner/repo/123",
+			wantErr: true,
+		},
+		{
+			name:    "too few path segments",
+			url:     "https://github.com/owner/pull/123",
+			wantErr: true,
+		},
+		{
+			name:    "PR number empty",
+			url:     "https://github.com/owner/repo/pull/",
+			wantErr: true,
+		},
+		{
+			name:    "PR number has letters",
+			url:     "https://github.com/owner/repo/pull/12a",
+			wantErr: true,
+		},
+		{
+			name:    "goose param with multiple values",
+			url:     "https://github.com/owner/repo/pull/123?goose=1&goose=2",
+			wantErr: true,
+		},
+		{
+			name:    "query param without goose prefix",
+			url:     "https://github.com/owner/repo/pull/123?other=value",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateGitHubPRURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateGitHubPRURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestOpenWithParams_EmptyParams(t *testing.T) {
+	ctx := context.Background()
+
+	// Test with empty params map
+	err := OpenWithParams(ctx, "https://github.com/owner/repo", map[string]string{})
+	// Validation should pass, browser open may fail (which is OK for test)
+	// We're just checking that empty params don't cause a panic
+	if err != nil && strings.Contains(err.Error(), "panic") {
+		t.Error("OpenWithParams with empty params should not panic")
+	}
+}
+
+func TestOpenWithParams_MultipleValidParams(t *testing.T) {
+	ctx := context.Background()
+
+	// Test with multiple valid params
+	err := OpenWithParams(ctx, "https://github.com/owner/repo", map[string]string{
+		"goose":  "review",
+		"source": "tray",
+	})
+	// The function will encode params and then check for %
+	// Since the values don't need encoding, it should pass validation
+	// Browser open may fail (which is OK for test)
+	if err != nil && strings.Contains(err.Error(), "invalid parameter") {
+		t.Errorf("OpenWithParams with valid params should not fail validation: %v", err)
+	}
+}

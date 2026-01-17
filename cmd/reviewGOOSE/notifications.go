@@ -38,8 +38,8 @@ func (app *App) processNotifications(ctx context.Context) {
 
 	// Update deprecated fields for test compatibility
 	app.mu.Lock()
-	app.previousBlockedPRs = make(map[string]bool)
-	app.blockedPRTimes = make(map[string]time.Time)
+	clear(app.previousBlockedPRs)
+	clear(app.blockedPRTimes)
 	states := app.stateManager.BlockedPRs()
 	for url, state := range states {
 		app.previousBlockedPRs[url] = true

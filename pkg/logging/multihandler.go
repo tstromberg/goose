@@ -1,4 +1,5 @@
-package main
+// Package logging provides logging utilities for the Goose application.
+package logging
 
 import (
 	"context"
@@ -8,6 +9,11 @@ import (
 // MultiHandler implements slog.Handler to write logs to multiple destinations.
 type MultiHandler struct {
 	handlers []slog.Handler
+}
+
+// NewMultiHandler creates a new MultiHandler that writes to multiple destinations.
+func NewMultiHandler(handlers ...slog.Handler) *MultiHandler {
+	return &MultiHandler{handlers: handlers}
 }
 
 // Enabled returns true if at least one handler is enabled.
@@ -21,15 +27,14 @@ func (h *MultiHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 // Handle writes the record to all handlers.
+// Errors from individual handlers are silently ignored to ensure all handlers execute.
 //
 //nolint:gocritic // record is an interface parameter, cannot change to pointer
 func (h *MultiHandler) Handle(ctx context.Context, record slog.Record) error {
 	for _, handler := range h.handlers {
 		if handler.Enabled(ctx, record.Level) {
-			if err := handler.Handle(ctx, record); err != nil {
-				// Continue logging to other destinations even if one fails
-				_ = err
-			}
+			// Intentionally ignore handler errors to ensure all handlers run
+			_ = handler.Handle(ctx, record) //nolint:errcheck // Error intentionally ignored
 		}
 	}
 	return nil

@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/codeGROOVE-dev/goose/pkg/ratelimit"
 )
 
 // TestConcurrentMenuOperations tests that concurrent menu operations don't cause deadlocks
@@ -14,7 +16,7 @@ func TestConcurrentMenuOperations(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{},
 		incoming: []PR{
 			{Repository: "org1/repo1", Number: 1, Title: "Fix bug", URL: "https://github.com/org1/repo1/pull/1"},
@@ -101,7 +103,7 @@ func TestMenuClickDeadlockScenario(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{},
 		incoming: []PR{
 			{Repository: "org1/repo1", Number: 1, Title: "Test PR", URL: "https://github.com/org1/repo1/pull/1"},
@@ -142,7 +144,7 @@ func TestRapidMenuClicks(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{},
 		lastSearchAttempt:  time.Now().Add(-15 * time.Second), // Allow first click
 		incoming: []PR{

@@ -221,7 +221,7 @@ func (c *Cache) Put(incoming, outgoing int, data []byte) {
 
 	// Simple size limit
 	if len(c.icons) > 100 {
-		c.icons = make(map[string][]byte)
+		clear(c.icons)
 	}
 
 	c.icons[key(incoming, outgoing)] = data

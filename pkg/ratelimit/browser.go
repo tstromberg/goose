@@ -1,4 +1,5 @@
-package main
+// Package ratelimit provides rate limiting functionality for browser operations.
+package ratelimit
 
 import (
 	"log/slog"
@@ -120,6 +121,6 @@ func (b *BrowserRateLimiter) Reset() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	previousCount := len(b.openedPRs)
-	b.openedPRs = make(map[string]bool)
+	clear(b.openedPRs)
 	slog.Info("[BROWSER] Rate limiter reset", "clearedPRs", previousCount)
 }
