@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codeGROOVE-dev/goose/pkg/dedup"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/codeGROOVE-dev/sprinkler/pkg/client"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
@@ -38,7 +39,7 @@ type sprinklerMonitor struct {
 	client          *client.Client
 	cancel          context.CancelFunc
 	eventChan       chan prEvent
-	lastEventMap    map[string]time.Time
+	dedup           *dedup.Manager
 	token           string
 	serverAddress   string // Custom server hostname (empty = use default)
 	orgs            []string
@@ -56,7 +57,7 @@ func newSprinklerMonitor(app *App, token, sprinklerServer string) *sprinklerMoni
 		serverAddress: sprinklerServer,
 		orgs:          make([]string, 0),
 		eventChan:     make(chan prEvent, eventChannelSize),
-		lastEventMap:  make(map[string]time.Time),
+		dedup:         dedup.New(eventDedupWindow, eventMapCleanupAge, eventMapMaxSize),
 	}
 }
 
@@ -225,31 +226,10 @@ func (sm *sprinklerMonitor) handleEvent(event client.Event) {
 	}
 
 	// Dedupe events - only process if we haven't seen this URL recently
-	sm.mu.Lock()
-	lastSeen, exists := sm.lastEventMap[event.URL]
-	now := time.Now()
-	if exists && now.Sub(lastSeen) < eventDedupWindow {
-		sm.mu.Unlock()
-		slog.Debug("[SPRINKLER] Skipping duplicate event",
-			"url", event.URL,
-			"last_seen", now.Sub(lastSeen).Round(time.Millisecond))
+	if !sm.dedup.ShouldProcess(event.URL, time.Now()) {
+		slog.Debug("[SPRINKLER] Skipping duplicate event", "url", event.URL)
 		return
 	}
-	sm.lastEventMap[event.URL] = now
-
-	// Clean up old entries to prevent memory leak
-	if len(sm.lastEventMap) > eventMapMaxSize {
-		// Remove entries older than the cleanup age threshold
-		cutoff := now.Add(-eventMapCleanupAge)
-		for url, timestamp := range sm.lastEventMap {
-			if timestamp.Before(cutoff) {
-				delete(sm.lastEventMap, url)
-			}
-		}
-		slog.Debug("[SPRINKLER] Cleaned up event map",
-			"entries_remaining", len(sm.lastEventMap))
-	}
-	sm.mu.Unlock()
 
 	slog.Info("[SPRINKLER] PR event received",
 		"url", event.URL,
@@ -304,9 +284,17 @@ func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, evt prEvent) {
 		return
 	}
 
-	repo, n := parseRepoAndNumberFromURL(evt.url)
-	if repo == "" || n == 0 {
-		slog.Warn("[SPRINKLER] Failed to parse PR URL", "url", evt.url)
+	// Parse repo and PR number from URL (https://github.com/org/repo/pull/123)
+	parts := strings.Split(evt.url, "/")
+	const minParts = 7
+	if len(parts) < minParts || parts[2] != "github.com" {
+		slog.Warn("[SPRINKLER] Invalid PR URL format", "url", evt.url)
+		return
+	}
+	repo := fmt.Sprintf("%s/%s", parts[3], parts[4])
+	var n int
+	if _, err := fmt.Sscanf(parts[6], "%d", &n); err != nil {
+		slog.Warn("[SPRINKLER] Failed to parse PR number from URL", "url", evt.url, "error", err)
 		return
 	}
 
@@ -319,12 +307,33 @@ func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, evt prEvent) {
 		return
 	}
 
-	act := validateUserAction(data, user, repo, n, cached)
-	if act == nil {
+	// Check if user needs to take critical action
+	if data.Analysis.NextAction == nil {
+		slog.Debug("[SPRINKLER] No turn data available",
+			"repo", repo,
+			"number", n,
+			"cached", cached)
+		return
+	}
+	act, exists := data.Analysis.NextAction[user]
+	if !exists {
+		slog.Debug("[SPRINKLER] No action required for user",
+			"repo", repo,
+			"number", n,
+			"user", user,
+			"state", data.PullRequest.State)
+		return
+	}
+	if !act.Critical {
+		slog.Debug("[SPRINKLER] Non-critical action, skipping notification",
+			"repo", repo,
+			"number", n,
+			"action", act.Kind,
+			"critical", act.Critical)
 		return
 	}
 
-	if sm.handleNewPR(ctx, evt.url, repo, n, act) {
+	if sm.handleNewPR(ctx, evt.url, repo, n, &act) {
 		return
 	}
 
@@ -340,7 +349,7 @@ func (sm *sprinklerMonitor) checkAndNotify(ctx context.Context, evt prEvent) {
 		"event_timestamp", evt.timestamp.Format(time.RFC3339),
 		"elapsed", time.Since(start).Round(time.Millisecond))
 
-	sm.sendNotifications(ctx, evt.url, repo, n, act)
+	sm.sendNotifications(ctx, evt.url, repo, n, &act)
 }
 
 // fetchTurnData retrieves PR data from Turn API with retry logic.
@@ -413,38 +422,6 @@ func (sm *sprinklerMonitor) handleClosedPR(
 	}
 
 	return false
-}
-
-// validateUserAction checks if the user needs to take action and returns the action if critical.
-func validateUserAction(data *turn.CheckResponse, user, repo string, n int, cached bool) *turn.Action {
-	if data == nil || data.Analysis.NextAction == nil {
-		slog.Debug("[SPRINKLER] No turn data available",
-			"repo", repo,
-			"number", n,
-			"cached", cached)
-		return nil
-	}
-
-	act, exists := data.Analysis.NextAction[user]
-	if !exists {
-		slog.Debug("[SPRINKLER] No action required for user",
-			"repo", repo,
-			"number", n,
-			"user", user,
-			"state", data.PullRequest.State)
-		return nil
-	}
-
-	if !act.Critical {
-		slog.Debug("[SPRINKLER] Non-critical action, skipping notification",
-			"repo", repo,
-			"number", n,
-			"action", act.Kind,
-			"critical", act.Critical)
-		return nil
-	}
-
-	return &act
 }
 
 // handleNewPR triggers a refresh for PRs not in our lists and returns true if handled.
@@ -597,31 +574,4 @@ func (sm *sprinklerMonitor) stop() {
 	slog.Info("[SPRINKLER] Stopping event monitor")
 	sm.cancel()
 	sm.isRunning = false
-}
-
-// connectionStatus returns the current WebSocket connection status.
-func (sm *sprinklerMonitor) connectionStatus() (connected bool, lastConnectedAt time.Time) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.isConnected, sm.lastConnectedAt
-}
-
-// parseRepoAndNumberFromURL extracts repo and PR number from URL.
-func parseRepoAndNumberFromURL(url string) (repo string, number int) {
-	// URL format: https://github.com/org/repo/pull/123
-	const minParts = 7
-	parts := strings.Split(url, "/")
-	if len(parts) < minParts || parts[2] != "github.com" {
-		return "", 0
-	}
-
-	repo = fmt.Sprintf("%s/%s", parts[3], parts[4])
-
-	var n int
-	_, err := fmt.Sscanf(parts[6], "%d", &n)
-	if err != nil {
-		return "", 0
-	}
-
-	return repo, n
 }

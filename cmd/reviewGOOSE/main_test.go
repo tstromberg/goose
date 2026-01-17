@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codeGROOVE-dev/goose/pkg/ratelimit"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/google/go-github/v57/github"
 )
@@ -79,7 +80,7 @@ func TestMenuItemTitleTransition(t *testing.T) {
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
 		blockedPRTimes:     make(map[string]time.Time),
-		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
@@ -328,7 +329,7 @@ func TestTrayIconRestoredAfterNetworkRecovery(t *testing.T) {
 		blockedPRTimes:     make(map[string]time.Time),
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
-		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   mock,
 		menuInitialized:    true,
 	}
@@ -376,7 +377,7 @@ func TestTrayTitleUpdates(t *testing.T) {
 		blockedPRTimes:     make(map[string]time.Time),
 		hiddenOrgs:         make(map[string]bool),
 		seenOrgs:           make(map[string]bool),
-		browserRateLimiter: NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter: ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		systrayInterface:   &MockSystray{}, // Use mock systray to avoid panics
 	}
 
@@ -500,7 +501,7 @@ func TestSoundPlaybackDuringTransitions(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     true,
 		initialLoadComplete: true, // Set to true to allow sound playback
 		menuInitialized:     true,
@@ -651,7 +652,7 @@ func TestSoundDisabledNoPlayback(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     false, // Audio disabled
 		initialLoadComplete: true,
 		menuInitialized:     true,
@@ -691,7 +692,7 @@ func TestGracePeriodPreventsNotifications(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     true,
 		initialLoadComplete: true,
 		menuInitialized:     true,
@@ -816,7 +817,7 @@ func TestNotificationScenarios(t *testing.T) {
 				hiddenOrgs:          make(map[string]bool),
 				seenOrgs:            make(map[string]bool),
 				previousBlockedPRs:  make(map[string]bool),
-				browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+				browserRateLimiter:  ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 				enableAudioCues:     true,
 				initialLoadComplete: tt.initialLoadComplete,
 				menuInitialized:     true,
@@ -876,7 +877,7 @@ func TestNewlyBlockedPRAfterGracePeriod(t *testing.T) {
 		hiddenOrgs:          make(map[string]bool),
 		seenOrgs:            make(map[string]bool),
 		previousBlockedPRs:  make(map[string]bool),
-		browserRateLimiter:  NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
+		browserRateLimiter:  ratelimit.NewBrowserRateLimiter(startupGracePeriod, 5, defaultMaxBrowserOpensDay),
 		enableAudioCues:     true,
 		initialLoadComplete: true, // Already past initial load
 		menuInitialized:     true,

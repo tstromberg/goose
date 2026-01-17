@@ -178,7 +178,11 @@ func (hm *healthMonitor) logMetrics() {
 	sprinklerConnected := false
 	sprinklerLastConnected := ""
 	if hm.app.sprinklerMonitor != nil {
-		connected, lastConnectedAt := hm.app.sprinklerMonitor.connectionStatus()
+		hm.app.sprinklerMonitor.mu.RLock()
+		connected := hm.app.sprinklerMonitor.isConnected
+		lastConnectedAt := hm.app.sprinklerMonitor.lastConnectedAt
+		hm.app.sprinklerMonitor.mu.RUnlock()
+
 		sprinklerConnected = connected
 		if !lastConnectedAt.IsZero() {
 			sprinklerLastConnected = time.Since(lastConnectedAt).Round(time.Second).String() + " ago"

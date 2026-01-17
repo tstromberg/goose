@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -19,6 +20,8 @@ import (
 	"time"
 
 	"github.com/codeGROOVE-dev/goose/cmd/reviewGOOSE/x11tray"
+	"github.com/codeGROOVE-dev/goose/pkg/logging"
+	"github.com/codeGROOVE-dev/goose/pkg/ratelimit"
 	"github.com/codeGROOVE-dev/retry"
 	"github.com/codeGROOVE-dev/turnclient/pkg/turn"
 	"github.com/energye/systray"
@@ -38,8 +41,8 @@ var (
 	date    = "unknown"
 )
 
-// getVersion returns the version string, preferring ldflags but falling back to VERSION file.
-func getVersion() string {
+// appVersion returns the version string, preferring ldflags but falling back to VERSION file.
+func appVersion() string {
 	// If version was set via ldflags and isn't the default, use it
 	if version != "" && version != "dev" {
 		return version
@@ -49,6 +52,46 @@ func getVersion() string {
 		return v
 	}
 	return "dev"
+}
+
+// logDir returns the platform-appropriate directory for application logs.
+// - macOS: ~/Library/Logs/reviewGOOSE.
+// - Linux: ~/.local/state/reviewGOOSE (or $XDG_STATE_HOME/reviewGOOSE if set).
+// - Windows: %LOCALAPPDATA%\reviewGOOSE\Logs.
+func logDir() (string, error) {
+	var dir string
+
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS: use ~/Library/Logs
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		dir = filepath.Join(home, "Library", "Logs", "reviewGOOSE")
+
+	case "windows":
+		// Windows: use %LOCALAPPDATA%\reviewGOOSE\Logs
+		localAppData := os.Getenv("LOCALAPPDATA")
+		if localAppData == "" {
+			return "", errors.New("LOCALAPPDATA environment variable not set")
+		}
+		dir = filepath.Join(localAppData, "reviewGOOSE", "Logs")
+
+	default:
+		// Linux and other Unix: use XDG_STATE_HOME or ~/.local/state
+		stateHome := os.Getenv("XDG_STATE_HOME")
+		if stateHome == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			stateHome = filepath.Join(home, ".local", "state")
+		}
+		dir = filepath.Join(stateHome, "reviewGOOSE")
+	}
+
+	return dir, nil
 }
 
 const (
@@ -112,7 +155,7 @@ type App struct {
 	lastSuccessfulFetch          time.Time
 	startTime                    time.Time
 	systrayInterface             SystrayInterface
-	browserRateLimiter           *BrowserRateLimiter
+	browserRateLimiter           *ratelimit.BrowserRateLimiter
 	blockedPRTimes               map[string]time.Time
 	currentUser                  *github.User
 	stateManager                 *PRStateManager
@@ -168,7 +211,7 @@ func main() {
 
 	// Handle version flag
 	if showVersion {
-		fmt.Printf("goose version %s\ncommit: %s\nbuilt: %s\n", getVersion(), commit, date)
+		fmt.Printf("goose version %s\ncommit: %s\nbuilt: %s\n", appVersion(), commit, date)
 		os.Exit(0)
 	}
 
@@ -207,7 +250,7 @@ func main() {
 	}
 	opts := &slog.HandlerOptions{AddSource: true, Level: logLevel, ReplaceAttr: simplifySource}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
-	slog.Info("Starting Goose", "version", getVersion(), "commit", commit, "date", date)
+	slog.Info("Starting Goose", "version", appVersion(), "commit", commit, "date", date)
 	slog.Info("Configuration", "update_interval", updateInterval, "max_retries", maxRetries, "max_delay", maxRetryDelay)
 	slog.Info("Browser auto-open configuration",
 		"startup_delay", browserOpenDelay,
@@ -228,25 +271,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Set up file-based logging alongside cache
-	logDir := filepath.Join(cacheDir, "logs")
-	if err := os.MkdirAll(logDir, dirPerm); err != nil {
+	// Set up file-based logging in platform-appropriate location
+	logDirectory, err := logDir()
+	if err != nil {
+		slog.Error("Failed to determine log directory", "error", err)
+		// Continue without file logging
+	} else if err := os.MkdirAll(logDirectory, dirPerm); err != nil {
 		slog.Error("Failed to create log directory", "error", err)
 		// Continue without file logging
 	} else {
 		// Create log file with daily rotation
-		logPath := filepath.Join(logDir, fmt.Sprintf("goose-%s.log", time.Now().Format("2006-01-02")))
+		logPath := filepath.Join(logDirectory, fmt.Sprintf("goose-%s.log", time.Now().Format("2006-01-02")))
 		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 		if err != nil {
 			slog.Error("Failed to open log file", "error", err)
 		} else {
 			// Update logger to write to both stderr and file
-			multiHandler := &MultiHandler{
-				handlers: []slog.Handler{
-					slog.NewTextHandler(os.Stderr, opts),
-					slog.NewTextHandler(logFile, opts),
-				},
-			}
+			multiHandler := logging.NewMultiHandler(
+				slog.NewTextHandler(os.Stderr, opts),
+				slog.NewTextHandler(logFile, opts),
+			)
 			slog.SetDefault(slog.New(multiHandler))
 			slog.Info("Logs are being written to", "path", logPath)
 		}
@@ -262,7 +306,7 @@ func main() {
 		updateInterval:     updateInterval,
 		enableAudioCues:    true,
 		enableAutoBrowser:  false, // Default to false for safety
-		browserRateLimiter: NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
+		browserRateLimiter: ratelimit.NewBrowserRateLimiter(browserOpenDelay, maxBrowserOpensMinute, maxBrowserOpensDay),
 		startTime:          startTime,
 		systrayInterface:   &RealSystray{}, // Use real systray implementation
 		seenOrgs:           make(map[string]bool),
@@ -959,11 +1003,13 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr *PR, autoBrowserEnabled bo
 		return
 	}
 
-	// Skip draft PRs authored by the user we're querying for
+	// Determine queried user for draft check
 	queriedUser := app.targetUser
 	if queriedUser == "" && app.currentUser != nil {
 		queriedUser = app.currentUser.GetLogin()
 	}
+
+	// Skip draft PRs authored by the user we're querying for
 	if pr.IsDraft && pr.Author == queriedUser {
 		slog.Debug("[BROWSER] Skipping auto-open for draft PR by queried user",
 			"repo", pr.Repository, "number", pr.Number, "author", pr.Author)
@@ -971,7 +1017,6 @@ func (app *App) tryAutoOpenPR(ctx context.Context, pr *PR, autoBrowserEnabled bo
 	}
 
 	// Only auto-open if the PR is actually blocked or needs review
-	// This ensures we have a valid NextAction before opening
 	if !pr.IsBlocked && !pr.NeedsReview {
 		slog.Debug("[BROWSER] Skipping auto-open for non-blocked PR",
 			"repo", pr.Repository, "number", pr.Number,
