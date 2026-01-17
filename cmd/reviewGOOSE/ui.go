@@ -740,7 +740,7 @@ func (app *App) rebuildMenu(ctx context.Context) {
 	// Add Web Dashboard link
 	dashboardItem := app.systrayInterface.AddMenuItem("Web Dashboard", "")
 	dashboardItem.Click(func() {
-		if err := openURL(ctx, "https://reviewGOOSE.dev/", ""); err != nil {
+		if err := openURL(ctx, "https://my.reviewGOOSE.dev/", ""); err != nil {
 			slog.Error("failed to open dashboard", "error", err)
 		}
 	})
